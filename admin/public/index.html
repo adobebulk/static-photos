@@ -289,6 +289,7 @@
       <div class="topbar-nav">
         <button onclick="openNewProject()">+ New Series</button>
         <button id="btn-rebuild" onclick="rebuild()"><span id="rebuild-icon">↻</span> Rebuild</button>
+        <button id="btn-deploy" onclick="deploy()">Deploy →</button>
       </div>
     </div>
     <span style="font-size:11px;color:var(--muted)" id="rebuild-label">—</span>
@@ -558,6 +559,23 @@ async function rebuild() {
   }
   icon.className = ''; icon.textContent = '↻';
   document.getElementById('btn-rebuild').disabled = false;
+}
+
+// ── Deploy ────────────────────────────────────────────────────────
+async function deploy() {
+  if (!confirm('Commit content changes and push to GitHub? Cloudflare Pages will build and deploy automatically.')) return;
+  const btn = document.getElementById('btn-deploy');
+  btn.disabled = true; btn.textContent = '↻ Deploying…';
+  setRebuildStatus('building', 'Pushing to GitHub…');
+  try {
+    const res = await api('POST', '/deploy');
+    setRebuildStatus('idle', 'Deployed ✓ — CF Pages is building');
+    toast(res.message || 'Deployed!');
+  } catch(e) {
+    setRebuildStatus('error', 'Deploy failed');
+    toast('Deploy failed: ' + e.message, true);
+  }
+  btn.disabled = false; btn.textContent = 'Deploy →';
 }
 
 // ── Sheet helpers ─────────────────────────────────────────────────

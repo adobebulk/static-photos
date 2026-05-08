@@ -87,6 +87,9 @@ function readFrontMatter(mdPath) {
 function writeFrontMatter(mdPath, fm, body = '') {
   const lines = Object.entries(fm)
     .map(([k, v]) => {
+      // Always write draft (and any true/false string) as a proper YAML boolean
+      if (v === true  || v === 'true')  return `${k}: true`;
+      if (v === false || v === 'false') return `${k}: false`;
       if (typeof v === 'string') return `${k}: "${v}"`;
       return `${k}: ${v}`;
     })
@@ -288,6 +291,28 @@ app.post('/api/projects/:slug/publish', (req, res) => {
   writeFrontMatter(mdPath, fm);
   logger.info('Set', slug, 'draft →', fm.draft);
   res.json({ slug, draft: fm.draft === 'true' });
+});
+
+// Deploy — git commit content changes + push → triggers Cloudflare Pages build
+app.post('/api/deploy', async (_, res) => {
+  try {
+    logger.info('Deploy: starting git push');
+    const ts = new Date().toISOString().replace('T', ' ').slice(0, 16);
+    execSync('git add site/content/', { cwd: REPO_ROOT });
+    const status = execSync('git status --porcelain', { cwd: REPO_ROOT }).toString().trim();
+    if (status) {
+      execSync(`git commit -m "content: update ${ts}"`, { cwd: REPO_ROOT });
+      logger.info('Deploy: committed changes');
+    } else {
+      logger.info('Deploy: nothing new to commit, pushing anyway');
+    }
+    execSync('git push', { cwd: REPO_ROOT });
+    logger.info('Deploy: pushed — Cloudflare Pages will build automatically');
+    res.json({ ok: true, message: 'Pushed to GitHub. Cloudflare Pages is building.' });
+  } catch (err) {
+    logger.error('Deploy failed:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 app.post('/api/rebuild', async (_, res) => {
