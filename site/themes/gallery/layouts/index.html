@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="{{ .Site.LanguageCode }}">
+<head>{{ partial "head.html" . }}</head>
+<body class="min-h-screen flex flex-col bg-stone-50 text-stone-900 font-sans">
+  {{ partial "header.html" . }}
+
+  <main class="flex-1 p-1.5">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
+      {{- $projects := where (where .Site.RegularPages "Section" "projects") "Params.draft" "ne" true -}}
+      {{- range sort $projects "Date" "desc" -}}
+        {{- $images := .Resources.ByType "image" -}}
+        {{- $cover  := index $images 0 -}}
+        {{- with .Params.cover -}}
+          {{- $c := $.Resources.GetMatch . -}}
+          {{- if $c }}{{ $cover = $c }}{{ end -}}
+        {{- end -}}
+
+        <a href="{{ .RelPermalink }}" class="relative block overflow-hidden rounded-sm bg-stone-200 aspect-[4/3] group">
+          {{- with $cover -}}
+            {{- $thumb := .Fill "800x600 q85 Center" -}}
+            <div class="project-thumb" style="background-image: url('{{ $thumb.RelPermalink }}')"></div>
+          {{- else -}}
+            <div class="w-full h-full bg-stone-200"></div>
+          {{- end -}}
+
+          <div class="absolute inset-0 flex flex-col justify-end p-5
+                      bg-gradient-to-t from-black/60 to-transparent
+                      opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+            <span class="text-white text-sm font-semibold tracking-tight leading-snug">{{ .Title }}</span>
+            <span class="text-white/60 text-xs mt-0.5">{{ len $images }} photo{{ if ne (len $images) 1 }}s{{ end }}</span>
+          </div>
+        </a>
+      {{- end -}}
+    </div>
+  </main>
+
+  <footer class="px-6 py-4 text-xs text-stone-400 border-t border-stone-200">
+    © {{ now.Year }} {{ .Site.Params.photographer }}
+  </footer>
+</body>
+</html>
