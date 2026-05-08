@@ -19,6 +19,5 @@ admin/.env
 .DS_Store
 Thumbs.db
 
-# Logs
-*.log
-npm-debug.log*
+# Logs (the directory is tracked via .gitkeep, but not the log files)
+logs/*.log

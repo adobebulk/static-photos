@@ -12,6 +12,9 @@
  *   cd admin && npm install && node server.js
  *
  * Then open http://localhost:3001 in any browser (or via Tailscale).
+ *
+ * Logs are written to: logs/admin.log (relative to repo root)
+ * Review with: tail -f logs/admin.log
  */
 
 'use strict';
@@ -25,12 +28,35 @@ const multer  = require('multer');
 
 // ─── Config ────────────────────────────────────────────────────────────────
 
-const PORT         = process.env.ADMIN_PORT   || 3001;
-// Paths are relative to this file's location (admin/).
+const PORT         = process.env.ADMIN_PORT || 3001;
 const SITE_ROOT    = path.resolve(__dirname, '..', 'site');
+const REPO_ROOT    = path.resolve(__dirname, '..');
 const CONTENT_DIR  = path.join(SITE_ROOT, 'content', 'projects');
 const HUGO_DIR     = SITE_ROOT;
 const UPLOAD_TMP   = path.join(__dirname, 'uploads');
+const LOG_FILE     = path.join(REPO_ROOT, 'logs', 'admin.log');
+
+// ─── Logger ────────────────────────────────────────────────────────────────
+
+fs.mkdirSync(path.dirname(LOG_FILE), { recursive: true });
+
+function log(level, ...args) {
+  const ts  = new Date().toISOString();
+  const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+  const line = `[${ts}] [${level}] ${msg}\n`;
+  process.stdout.write(line);
+  fs.appendFileSync(LOG_FILE, line);
+}
+
+const logger = {
+  info:  (...a) => log('INFO ', ...a),
+  warn:  (...a) => log('WARN ', ...a),
+  error: (...a) => log('ERROR', ...a),
+};
+
+// Log unhandled errors so they always land in the file
+process.on('uncaughtException',  err => logger.error('Uncaught exception:', err.stack));
+process.on('unhandledRejection', err => logger.error('Unhandled rejection:', err));
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -52,7 +78,10 @@ function readFrontMatter(mdPath) {
       if (k && rest.length) fm[k.trim()] = rest.join(':').trim().replace(/^"(.*)"$/, '$1');
     }
     return fm;
-  } catch { return {}; }
+  } catch (e) {
+    logger.warn('readFrontMatter failed for', mdPath, ':', e.message);
+    return {};
+  }
 }
 
 function writeFrontMatter(mdPath, fm, body = '') {
@@ -63,6 +92,7 @@ function writeFrontMatter(mdPath, fm, body = '') {
     })
     .join('\n');
   fs.writeFileSync(mdPath, `---\n${lines}\n---\n${body}`);
+  logger.info('Wrote front matter to', mdPath);
 }
 
 function listProjects() {
@@ -77,12 +107,12 @@ function listProjects() {
       const photos  = listPhotos(slug);
       return {
         slug,
-        title:       fm.title   || slug,
+        title:       fm.title       || slug,
         description: fm.description || '',
-        date:        fm.date    || '',
+        date:        fm.date        || '',
         draft:       fm.draft === 'true' || fm.draft === true,
         photoCount:  photos.length,
-        cover:       fm.cover   || (photos[0] || ''),
+        cover:       fm.cover       || (photos[0] || ''),
       };
     });
 }
@@ -97,29 +127,45 @@ function listPhotos(slug) {
 
 function hugoRebuild() {
   return new Promise((resolve, reject) => {
-    // Also run tailwind first if the binary is available
-    const tw = path.resolve(__dirname, '..', 'node_modules', '.bin', 'tailwindcss');
+    logger.info('Hugo rebuild started');
+
+    // Run Tailwind first if available
+    const tw = path.resolve(REPO_ROOT, 'node_modules', '.bin', 'tailwindcss');
     const twInput  = path.join(SITE_ROOT, 'assets', 'css', 'input.css');
     const twOutput = path.join(SITE_ROOT, 'static', 'css', 'style.css');
     if (fs.existsSync(tw)) {
       try {
-        execSync(`"${tw}" -i "${twInput}" -o "${twOutput}" --minify`, { cwd: HUGO_DIR });
+        execSync(`"${tw}" -i "${twInput}" -o "${twOutput}" --minify`, { cwd: REPO_ROOT });
+        logger.info('Tailwind build OK →', twOutput);
       } catch (e) {
-        console.warn('Tailwind build warning:', e.message);
+        logger.warn('Tailwind build warning:', e.message);
       }
+    } else {
+      logger.warn('Tailwind binary not found at', tw, '— skipping CSS rebuild');
     }
 
     const hugo = spawn('hugo', ['--source', HUGO_DIR, '--minify'], {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+
     let out = '';
-    hugo.stdout.on('data', d => (out += d));
-    hugo.stderr.on('data', d => (out += d));
+    hugo.stdout.on('data', d => { out += d; });
+    hugo.stderr.on('data', d => { out += d; });
+
     hugo.on('close', code => {
-      if (code === 0) resolve(out);
-      else reject(new Error(out || `Hugo exited with code ${code}`));
+      if (code === 0) {
+        logger.info('Hugo rebuild succeeded:\n' + out.trim());
+        resolve(out);
+      } else {
+        logger.error('Hugo rebuild FAILED (exit', code + '):\n' + out.trim());
+        reject(new Error(out || `Hugo exited with code ${code}`));
+      }
     });
-    hugo.on('error', err => reject(new Error(`Could not start hugo: ${err.message}`)));
+
+    hugo.on('error', err => {
+      logger.error('Could not start hugo:', err.message);
+      reject(new Error(`Could not start hugo: ${err.message}`));
+    });
   });
 }
 
@@ -128,6 +174,12 @@ function hugoRebuild() {
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Request logger middleware
+app.use((req, _res, next) => {
+  logger.info(`${req.method} ${req.path}`);
+  next();
+});
 
 fs.mkdirSync(UPLOAD_TMP, { recursive: true });
 
@@ -140,17 +192,16 @@ const upload = multer({
 });
 
 // ─── Serve raw photos for admin preview ────────────────────────────────────
-// e.g. GET /photos/iceland-2024/001.jpg → content/projects/iceland-2024/001.jpg
 app.use('/photos', express.static(CONTENT_DIR));
 
 // ─── API routes ────────────────────────────────────────────────────────────
 
-// List all projects
 app.get('/api/projects', (_, res) => {
-  res.json(listProjects());
+  const projects = listProjects();
+  logger.info('Listed projects:', projects.map(p => p.slug));
+  res.json(projects);
 });
 
-// Create a new project
 app.post('/api/projects', (req, res) => {
   const { title, description } = req.body;
   if (!title) return res.status(400).json({ error: 'title required' });
@@ -167,10 +218,10 @@ app.post('/api/projects', (req, res) => {
     cover: '',
     draft: true,
   });
+  logger.info('Created project:', slug);
   res.json({ slug, title, draft: true });
 });
 
-// Upload photos to a project
 app.post('/api/projects/:slug/photos', upload.array('photos', 100), async (req, res) => {
   const { slug } = req.params;
   const dir = path.join(CONTENT_DIR, slug);
@@ -186,7 +237,6 @@ app.post('/api/projects/:slug/photos', upload.array('photos', 100), async (req, 
     saved.push(path.basename(dest));
   }
 
-  // Auto-set cover if none is set yet
   const mdPath = path.join(dir, 'index.md');
   const fm = readFrontMatter(mdPath);
   if (!fm.cover && saved.length > 0) {
@@ -194,25 +244,24 @@ app.post('/api/projects/:slug/photos', upload.array('photos', 100), async (req, 
     writeFrontMatter(mdPath, fm);
   }
 
+  logger.info('Uploaded to', slug + ':', saved);
   res.json({ uploaded: saved });
 });
 
-// List photos in a project
 app.get('/api/projects/:slug/photos', (req, res) => {
   const { slug } = req.params;
   res.json(listPhotos(slug));
 });
 
-// Delete a photo
 app.delete('/api/projects/:slug/photos/:photo', (req, res) => {
   const { slug, photo } = req.params;
   const filePath = path.join(CONTENT_DIR, slug, path.basename(photo));
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'photo not found' });
   fs.unlinkSync(filePath);
+  logger.info('Deleted photo:', slug + '/' + photo);
   res.json({ deleted: photo });
 });
 
-// Update project metadata (title, description, cover, draft)
 app.patch('/api/projects/:slug', (req, res) => {
   const { slug } = req.params;
   const mdPath = path.join(CONTENT_DIR, slug, 'index.md');
@@ -225,10 +274,10 @@ app.patch('/api/projects/:slug', (req, res) => {
   if (cover       !== undefined) fm.cover       = cover;
   if (draft       !== undefined) fm.draft       = draft;
   writeFrontMatter(mdPath, fm);
+  logger.info('Updated metadata for', slug, req.body);
   res.json({ ok: true, ...fm });
 });
 
-// Publish (set draft: false) or unpublish (draft: true)
 app.post('/api/projects/:slug/publish', (req, res) => {
   const { slug } = req.params;
   const mdPath = path.join(CONTENT_DIR, slug, 'index.md');
@@ -237,10 +286,10 @@ app.post('/api/projects/:slug/publish', (req, res) => {
   const fm = readFrontMatter(mdPath);
   fm.draft = req.body.draft === true ? 'true' : 'false';
   writeFrontMatter(mdPath, fm);
+  logger.info('Set', slug, 'draft →', fm.draft);
   res.json({ slug, draft: fm.draft === 'true' });
 });
 
-// Trigger Hugo rebuild
 app.post('/api/rebuild', async (_, res) => {
   try {
     const output = await hugoRebuild();
@@ -253,5 +302,7 @@ app.post('/api/rebuild', async (_, res) => {
 // ─── Start ─────────────────────────────────────────────────────────────────
 
 app.listen(PORT, () => {
-  console.log(`\n📷  Photo admin running at http://localhost:${PORT}\n`);
+  logger.info(`Admin panel started on http://localhost:${PORT}`);
+  logger.info(`Logging to ${LOG_FILE}`);
+  logger.info(`Content dir: ${CONTENT_DIR}`);
 });
