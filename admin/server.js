@@ -25,6 +25,7 @@ const { execSync, spawn } = require('child_process');
 
 const express = require('express');
 const multer  = require('multer');
+const sharp   = require('sharp');
 
 // ─── Config ────────────────────────────────────────────────────────────────
 
@@ -232,12 +233,17 @@ app.post('/api/projects/:slug/photos', upload.array('photos', 100), async (req, 
 
   const saved = [];
   for (const file of (req.files || [])) {
-    const ext  = path.extname(file.originalname).toLowerCase() || '.jpg';
     const name = path.basename(file.originalname, path.extname(file.originalname))
       .replace(/[^a-z0-9_-]/gi, '_');
-    const dest = path.join(dir, `${name}${ext}`);
-    fs.renameSync(file.path, dest);
-    saved.push(path.basename(dest));
+    // Always normalise to JPEG, max 4000px — keeps files well under CF Pages' 25 MiB limit
+    const dest = path.join(dir, `${name}.jpg`);
+    await sharp(file.path)
+      .resize(4000, 4000, { fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 88, mozjpeg: false })
+      .toFile(dest);
+    fs.unlinkSync(file.path);
+    saved.push(`${name}.jpg`);
+    logger.info('Processed', file.originalname, '→', `${name}.jpg`);
   }
 
   const mdPath = path.join(dir, 'index.md');
