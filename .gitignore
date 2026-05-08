@@ -1,9 +1,20 @@
-# Hugo output
+# Hugo output & build artifacts
 site/public/
 site/resources/
+site/.hugo_build.lock
+site/hugo_stats.json
+
+# Generated CSS (built by Tailwind CLI — run `npm run css:build`)
+site/static/css/style.css
+
+# Node
+node_modules/
+admin/node_modules/
+
+# Lockfiles (keep package-lock.json but not the admin one for cleanliness)
+admin/package-lock.json
 
 # Admin panel
-admin/node_modules/
 admin/uploads/
 admin/.env
 
