@@ -1,0 +1,42 @@
+# ─── Caddyfile ────────────────────────────────────────────────────────────────
+# Serves the static Hugo site on port 80/443 and proxies the admin panel.
+#
+# Usage on Mac Mini:
+#   brew install caddy
+#   sudo caddy run --config /path/to/repo/Caddyfile
+#
+# For LAN-only use (no public domain), keep the :80 block.
+# When you're ready to go public, replace :80 with your domain name
+# and Caddy will auto-provision a Let's Encrypt TLS certificate.
+
+# ─── Public gallery ──────────────────────────────────────────────────────────
+:80 {
+  root * {$REPO_ROOT}/site/public
+  file_server
+
+  # Clean URLs: /iceland → /iceland/index.html
+  try_files {path} {path}/ {path}/index.html
+
+  # Compression
+  encode gzip
+
+  # Cache images aggressively (Hugo fingerprints them)
+  @images path *.jpg *.jpeg *.png *.webp *.avif *.gif *.ico *.svg
+  header @images Cache-Control "public, max-age=31536000, immutable"
+
+  # Shorter cache for HTML
+  @html path *.html /
+  header @html Cache-Control "public, max-age=300"
+}
+
+# ─── Admin panel (LAN only) ──────────────────────────────────────────────────
+# Accessible at http://<mac-mini-ip>:3001 directly (Node listens there).
+# If you want Caddy to front it (e.g. for a nicer URL or auth), uncomment:
+#
+# :3002 {
+#   reverse_proxy localhost:3001
+#   basicauth {
+#     # Generate hash: caddy hash-password --plaintext yourpassword
+#     admin $2a$14$...
+#   }
+# }
