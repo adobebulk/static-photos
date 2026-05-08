@@ -1,0 +1,16 @@
+# Hugo output
+site/public/
+site/resources/
+
+# Admin panel
+admin/node_modules/
+admin/uploads/
+admin/.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
