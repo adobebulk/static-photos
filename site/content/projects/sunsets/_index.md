@@ -16,8 +16,9 @@ photos:
     key: sunsets/002
     width: 8000
     height: 6000
-    caption: ''
+    caption: Airborne
     downloadable: false
+    body: 'Over the American Southwest: sunset.'
   - id: '003'
     key: sunsets/003
     width: 4032
@@ -31,6 +32,8 @@ photos:
     caption: ''
     downloadable: false
 ---
+
+
 
 
 

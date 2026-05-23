@@ -2,6 +2,10 @@ title: CT Smith Photos
 navLabel: photos.ctsmith.org
 photographer: C.T.Smith
 description: CT Smith Photos
-heroPhotoKey: ''
-heroLink: ''
-featured: []
+heroPhotoKey: sunsets/002
+heroLink: /projects/sunsets/
+featured:
+  - type: photo
+    slug: sunsets
+    photoId: '002'
+    label: ''
