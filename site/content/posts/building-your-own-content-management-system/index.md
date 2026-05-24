@@ -2,9 +2,10 @@
 title: Building My own Content Management System
 date: '2026-05-23'
 draft: false
-featured: false
+featured: true
 excerpt: Basalt - a custom content management system
 ---
+
 
 
 ## Static Websites and Managing Content
