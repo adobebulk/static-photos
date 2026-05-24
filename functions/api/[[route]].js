@@ -188,6 +188,9 @@ const stubPath = (slug, id) => `site/content/projects/${slug}/${id}.md`;
 const postPath = (slug) => `site/content/posts/${slug}/index.md`;
 const settingsPath = "site/data/settings.yaml";
 
+const POOL_SLUG = "_pool";
+const rawPoolKey = (pid) => `_pool/raw/${pid}/original.jpg`;
+
 const DEFAULT_SETTINGS = {
   title: "Photos",
   navLabel: "Work",
@@ -227,7 +230,7 @@ export async function onRequest(ctx) {
       const entries = await listDir(env.githubToken, env.githubRepo, "site/content/projects");
       const ghSlugs = entries ? entries.filter((e) => e.type === "dir").map((e) => e.name) : [];
       const stagedSlugs = await getStagedSlugs(env.stagingBucket);
-      const allSlugs = [...new Set([...ghSlugs, ...stagedSlugs])];
+      const allSlugs = [...new Set([...ghSlugs, ...stagedSlugs])].filter(s => s !== POOL_SLUG);
 
       const projects = (await Promise.all(
         allSlugs.map(async (slug) => {
@@ -741,6 +744,257 @@ export async function onRequest(ctx) {
       const updatedData = { ...data, draft: Boolean(draft) };
       await stageFile(env.stagingBucket, postPath(slug), serializeFrontMatter(updatedData, postBody));
       return json({ slug, draft: Boolean(draft) });
+    }
+
+    // ── POST /api/pool ────────────────────────────────────────────────────────
+    if (method === "POST" && segments.length === 1 && segments[0] === "pool") {
+      if (!env.originalsBucket) return err("ORIGINALS_BUCKET not configured", 503);
+      const formData = await request.formData();
+      const files = formData.getAll("photos");
+      if (!files.length) return err("no photos in request");
+
+      const uploaded = [];
+      for (const file of files) {
+        const buf = await file.arrayBuffer();
+        const dims = getImageDimensions(buf) ?? { width: 0, height: 0 };
+        const pid = crypto.randomUUID();
+        const uploadedAt = new Date().toISOString();
+        await env.originalsBucket.put(rawPoolKey(pid), buf, {
+          httpMetadata: { contentType: "image/jpeg" },
+          customMetadata: {
+            filename: file.name || "photo.jpg",
+            width: String(dims.width),
+            height: String(dims.height),
+            uploadedAt,
+            status: "raw",
+          },
+        });
+        uploaded.push({ pid, filename: file.name || "photo.jpg", width: dims.width, height: dims.height, uploadedAt });
+      }
+      return json({ uploaded }, 201);
+    }
+
+    // ── GET /api/pool ─────────────────────────────────────────────────────────
+    if (method === "GET" && segments.length === 1 && segments[0] === "pool") {
+      const rawList = await env.originalsBucket.list({ prefix: "_pool/raw/", include: ["customMetadata"] });
+      const raw = rawList.objects
+        .filter(obj => obj.key.endsWith("/original.jpg"))
+        .map(obj => {
+          const pid = obj.key.slice("_pool/raw/".length, -"/original.jpg".length);
+          const m = obj.customMetadata ?? {};
+          return {
+            pid,
+            status: "raw",
+            filename: m.filename ?? "photo.jpg",
+            width: parseInt(m.width ?? "0", 10),
+            height: parseInt(m.height ?? "0", 10),
+            uploadedAt: m.uploadedAt ?? "",
+          };
+        })
+        .sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt));
+
+      const poolManifest = await readManifest(env, POOL_SLUG);
+      const processed = (poolManifest?.data?.photos ?? []).map(p => ({
+        id: p.id,
+        key: p.key,
+        status: "processed",
+        caption: p.caption ?? "",
+        width: p.width ?? 0,
+        height: p.height ?? 0,
+      }));
+
+      return json({ raw, processed });
+    }
+
+    // ── POST /api/pool/process ────────────────────────────────────────────────
+    if (method === "POST" && segments.length === 2 && segments[0] === "pool" && segments[1] === "process") {
+      if (!env.assetsBucket) return err("ASSETS_BUCKET not configured", 503);
+      if (!env.originalsBucket) return err("ORIGINALS_BUCKET not configured", 503);
+
+      let reqBody = {};
+      const ct = request.headers.get("content-type") ?? "";
+      if (ct.includes("application/json")) {
+        try { reqBody = await request.json(); } catch (_) {}
+      }
+      const limit = typeof reqBody.limit === "number" ? reqBody.limit : 6;
+
+      // Ensure pool manifest exists (draft: true enforced permanently)
+      let poolManifest = await readManifest(env, POOL_SLUG);
+      if (!poolManifest) {
+        const initData = {
+          title: "Pool",
+          description: "Unassigned uploads",
+          date: new Date().toISOString().split("T")[0],
+          draft: true,
+          cover: "",
+          downloadsDefault: false,
+          photos: [],
+        };
+        await stageFile(env.stagingBucket, indexPath(POOL_SLUG), serializeFrontMatter(initData));
+        poolManifest = { data: initData, body: "" };
+      }
+
+      const rawList = await env.originalsBucket.list({ prefix: "_pool/raw/", include: ["customMetadata"] });
+      const rawObjects = rawList.objects.filter(obj => obj.key.endsWith("/original.jpg"));
+      const toProcess = rawObjects.slice(0, limit);
+
+      let photos = [...(poolManifest.data.photos ?? [])];
+      let processedCount = 0;
+
+      for (const rawObj of toProcess) {
+        const pid = rawObj.key.slice("_pool/raw/".length, -"/original.jpg".length);
+        const obj = await env.originalsBucket.get(rawPoolKey(pid));
+        if (!obj) continue;
+
+        const buf = await obj.arrayBuffer();
+        const meta = rawObj.customMetadata ?? {};
+        const width = parseInt(meta.width ?? "0", 10);
+        const height = parseInt(meta.height ?? "0", 10);
+
+        const id = nextPhotoId(photos);
+        const key = `${POOL_SLUG}/${id}`;
+        const originalKey = `${key}/original.jpg`;
+
+        // Temporarily public so generateVariants can fetch from the R2 custom domain
+        await env.assetsBucket.put(originalKey, buf, {
+          httpMetadata: { contentType: "image/jpeg" },
+        });
+
+        const variants = await generateVariants(POOL_SLUG, id, env);
+
+        for (const v of variants) {
+          await env.assetsBucket.put(v.key, v.buffer, {
+            httpMetadata: { contentType: v.contentType },
+          });
+        }
+
+        // Move original to private bucket, remove temp-public copy
+        await env.originalsBucket.put(originalKey, buf, {
+          httpMetadata: { contentType: "image/jpeg" },
+        });
+        await env.assetsBucket.delete(originalKey);
+
+        const photoEntry = { id, key, width, height, caption: "", downloadable: false };
+        photos.push(photoEntry);
+        await stageFile(env.stagingBucket, stubPath(POOL_SLUG, id), newPhotoStub(id));
+
+        // Delete raw object only after all above succeed (crash-safe)
+        await env.originalsBucket.delete(rawPoolKey(pid));
+        processedCount++;
+      }
+
+      const updatedPoolData = { ...poolManifest.data, photos, draft: true };
+      await stageFile(env.stagingBucket, indexPath(POOL_SLUG), serializeFrontMatter(updatedPoolData, poolManifest.body ?? ""));
+
+      const remaining = rawObjects.length - toProcess.length;
+      return json({ processed: processedCount, remaining });
+    }
+
+    // ── DELETE /api/pool/raw/:pid ─────────────────────────────────────────────
+    if (method === "DELETE" && segments.length === 3 && segments[0] === "pool" && segments[1] === "raw") {
+      const pid = segments[2];
+      await env.originalsBucket.delete(rawPoolKey(pid));
+      return json({ deleted: pid });
+    }
+
+    // ── DELETE /api/pool/:id ──────────────────────────────────────────────────
+    if (method === "DELETE" && segments.length === 2 && segments[0] === "pool") {
+      const id = segments[1];
+      const poolManifest = await readManifest(env, POOL_SLUG);
+      if (!poolManifest) return err("pool not found", 404);
+      const photos = poolManifest.data.photos ?? [];
+      const photo = photos.find(p => p.id === id);
+      if (!photo) return err("photo not found", 404);
+
+      const variantKeys = SIZES.flatMap(s => FORMATS.map(({ ext }) => `${POOL_SLUG}/${id}/${s}.${ext}`));
+      const originalKey = `${POOL_SLUG}/${id}/original.jpg`;
+      await env.assetsBucket.delete([...variantKeys, originalKey]);
+      await env.originalsBucket.delete(originalKey);
+
+      const updatedData = { ...poolManifest.data, photos: photos.filter(p => p.id !== id), draft: true };
+      await stageFile(env.stagingBucket, indexPath(POOL_SLUG), serializeFrontMatter(updatedData, poolManifest.body ?? ""));
+      await stageDelete(env.stagingBucket, stubPath(POOL_SLUG, id));
+
+      return json({ deleted: id });
+    }
+
+    // ── POST /api/projects/:slug/photos/from-pool ─────────────────────────────
+    if (
+      method === "POST" &&
+      segments.length === 4 &&
+      segments[0] === "projects" &&
+      segments[2] === "photos" &&
+      segments[3] === "from-pool"
+    ) {
+      // Client sends batches of ≤5 ids to stay within subrequest budget per call.
+      const slug = segments[1];
+      if (!env.assetsBucket || !env.originalsBucket) return err("R2 not configured", 503);
+
+      const { ids } = await request.json();
+      if (!Array.isArray(ids) || ids.length === 0) return err("ids array required");
+
+      const [targetManifest, poolManifest] = await Promise.all([
+        readManifest(env, slug),
+        readManifest(env, POOL_SLUG),
+      ]);
+      if (!targetManifest) return err("series not found", 404);
+      if (!poolManifest) return json({ moved: [], skipped: ids });
+
+      let targetPhotos = [...(targetManifest.data.photos ?? [])];
+      let poolPhotos = [...(poolManifest.data.photos ?? [])];
+      const moved = [];
+      const skipped = [];
+
+      for (const id of ids) {
+        const poolPhoto = poolPhotos.find(p => p.id === id);
+        if (!poolPhoto) { skipped.push(id); continue; }
+
+        const newId = nextPhotoId(targetPhotos);
+        const newKey = `${slug}/${newId}`;
+
+        // Copy 6 variants: ASSETS_BUCKET _pool/<id>/<size>.<ext> → <slug>/<newId>/<size>.<ext>
+        // R2 has no server-side rename; get+put+delete is the required pattern.
+        for (const size of SIZES) {
+          for (const { ext, contentType } of FORMATS) {
+            const srcKey = `${POOL_SLUG}/${id}/${size}.${ext}`;
+            const dstKey = `${newKey}/${size}.${ext}`;
+            const obj = await env.assetsBucket.get(srcKey);
+            if (obj) {
+              await env.assetsBucket.put(dstKey, obj.body, { httpMetadata: { contentType } });
+              await env.assetsBucket.delete(srcKey);
+            }
+          }
+        }
+
+        // Copy original: ORIGINALS_BUCKET _pool/<id>/original.jpg → <slug>/<newId>/original.jpg
+        const srcOrigKey = `${POOL_SLUG}/${id}/original.jpg`;
+        const dstOrigKey = `${newKey}/original.jpg`;
+        const origObj = await env.originalsBucket.get(srcOrigKey);
+        if (origObj) {
+          await env.originalsBucket.put(dstOrigKey, origObj.body, { httpMetadata: { contentType: "image/jpeg" } });
+          await env.originalsBucket.delete(srcOrigKey);
+        }
+
+        const newPhoto = { id: newId, key: newKey, width: poolPhoto.width, height: poolPhoto.height, caption: poolPhoto.caption || "", downloadable: false };
+        targetPhotos.push(newPhoto);
+        await stageFile(env.stagingBucket, stubPath(slug, newId), newPhotoStub(newId));
+        moved.push(newPhoto);
+
+        poolPhotos = poolPhotos.filter(p => p.id !== id);
+        await stageDelete(env.stagingBucket, stubPath(POOL_SLUG, id));
+      }
+
+      // Set cover on target series if currently unset
+      const updatedTargetData = { ...targetManifest.data, photos: targetPhotos };
+      if (!updatedTargetData.cover && targetPhotos.length > 0) {
+        updatedTargetData.cover = targetPhotos[0].id;
+      }
+      await stageFile(env.stagingBucket, indexPath(slug), serializeFrontMatter(updatedTargetData, targetManifest.body ?? ""));
+
+      const updatedPoolData = { ...poolManifest.data, photos: poolPhotos, draft: true };
+      await stageFile(env.stagingBucket, indexPath(POOL_SLUG), serializeFrontMatter(updatedPoolData, poolManifest.body ?? ""));
+
+      return json({ moved, skipped });
     }
 
     // ── 404 ──────────────────────────────────────────────────────────────────

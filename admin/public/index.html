@@ -449,6 +449,24 @@
     .post-card-meta { font-size: 11px; color: var(--muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     .post-card-actions { display: flex; gap: 4px; flex-shrink: 0; flex-wrap: wrap; }
 
+    /* ── Pool tiles ──────────────────────────────────────────── */
+    .pool-tile {
+      border: 2px solid var(--border-light);
+      border-radius: 2px;
+      overflow: hidden;
+      cursor: pointer;
+      transition: border-color .1s;
+    }
+    .pool-tile:hover { border-color: var(--border); }
+    .pool-tile-selected { border-color: var(--green) !important; }
+    .pool-tile img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
+    .pool-tile-label { font-size: 10px; color: var(--muted); padding: 3px 6px 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pool-tile-actions { display: flex; align-items: center; justify-content: space-between; padding: 2px 6px 4px; }
+    .pool-check { font-size: 14px; color: var(--green); }
+    .pool-tile-raw { cursor: default; background: #f5f5f4; }
+    .pool-tile-raw:hover { border-color: var(--border-light); }
+    .pool-tile-raw-body { padding: 8px 8px 4px; }
+
     /* ── Mobile overrides ────────────────────────────────────── */
     @media (max-width: 480px) {
       .tab-btn { padding: 12px 20px; flex: 1; text-align: center; }
@@ -517,6 +535,7 @@
   <div class="tab-bar">
     <button class="tab-btn active" id="tab-btn-series" onclick="switchTab('series')">Series</button>
     <button class="tab-btn" id="tab-btn-posts" onclick="switchTab('posts')">Posts</button>
+    <button class="tab-btn" id="tab-btn-pool" onclick="switchTab('pool')">Pool</button>
   </div>
 
   <!-- Series tab -->
@@ -549,6 +568,34 @@
     </div>
     <div id="posts-list" style="display:flex;flex-direction:column;gap:6px">
       <div class="empty" style="border:1px solid var(--border-light)">Loading…</div>
+    </div>
+  </div>
+
+  <!-- Pool tab -->
+  <div id="tab-pool" class="hidden">
+    <div class="upload-zone" id="pool-drop-zone"
+         onclick="document.getElementById('pool-file-input').click()"
+         ondragover="dragOver(event,this)" ondragleave="dragLeave(this)" ondrop="dropToPool(event,this)">
+      <strong>Drop photos into the pool</strong>
+      <p>Upload instantly — process and assign to a series later · JPG, PNG, WEBP, AVIF</p>
+      <input type="file" id="pool-file-input" accept="image/*" multiple style="display:none"
+             onchange="uploadToPool(this.files)">
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:16px 0 12px;border-bottom:1px solid var(--border-light)">
+      <button class="btn-action" onclick="processPool()">Process pool →</button>
+      <span id="pool-raw-status" style="font-size:12px;color:var(--muted)"></span>
+      <span id="pool-process-status" style="font-size:12px;color:var(--green)"></span>
+    </div>
+    <div id="pool-grid" style="margin-top:16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;"></div>
+    <!-- Sticky move bar: shown when processed pool photos are selected -->
+    <div id="pool-move-bar" class="hidden" style="position:fixed;bottom:52px;left:0;right:0;z-index:99;background:var(--bg);border-top:2px solid var(--green);padding:10px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px">
+      <span id="pool-move-label">0 selected</span>
+      <div style="flex:1"></div>
+      <span style="color:var(--muted)">Move to →</span>
+      <select id="pool-move-target" style="font-family:var(--mono);font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:2px;background:var(--bg);color:var(--text)">
+        <option value="">Select series…</option>
+      </select>
+      <button class="btn-action" onclick="moveSelectedFromPool()">Move →</button>
     </div>
   </div>
 
@@ -664,6 +711,22 @@
   </div>
 </div>
 
+<!-- ── Pool picker overlay (for "Add from pool" in series detail) ── -->
+<div class="overlay hidden" id="overlay-pool-picker" onclick="closeIfBackdrop(event,'overlay-pool-picker')">
+  <div class="sheet" style="max-height:85svh">
+    <div class="sheet-header">
+      <span class="sheet-title">Add from Pool</span>
+      <button class="sheet-close" onclick="closeSheet('overlay-pool-picker')">close [esc]</button>
+    </div>
+    <div class="sheet-body">
+      <div id="pool-picker-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:8px;min-height:60px"></div>
+      <div>
+        <button class="btn-action" id="pool-picker-add-btn" onclick="confirmPoolPickerMove()" disabled style="opacity:.4;pointer-events:none">Add to series →</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ── Photo picker overlay ──────────────────────────────────── -->
 <div class="overlay hidden" id="overlay-photo-picker" onclick="closeIfBackdrop(event,'overlay-photo-picker')">
   <div class="sheet" style="max-height:80svh">
@@ -739,10 +802,17 @@ function switchTab(tab) {
   currentTab = tab;
   document.getElementById('tab-series').classList.toggle('hidden', tab !== 'series');
   document.getElementById('tab-posts').classList.toggle('hidden', tab !== 'posts');
+  document.getElementById('tab-pool').classList.toggle('hidden', tab !== 'pool');
   document.getElementById('tab-btn-series').classList.toggle('active', tab === 'series');
   document.getElementById('tab-btn-posts').classList.toggle('active', tab === 'posts');
-  document.getElementById('btn-new').textContent = tab === 'series' ? '+ New Series' : '+ New Post';
+  document.getElementById('tab-btn-pool').classList.toggle('active', tab === 'pool');
+  const newBtn = document.getElementById('btn-new');
+  newBtn.style.display = tab === 'pool' ? 'none' : '';
+  newBtn.textContent = tab === 'series' ? '+ New Series' : '+ New Post';
+  // Hide pool move bar when leaving pool tab
+  if (tab !== 'pool') document.getElementById('pool-move-bar').classList.add('hidden');
   if (tab === 'posts') loadPostsList();
+  if (tab === 'pool') loadPool();
 }
 
 function onNew() {
@@ -832,6 +902,12 @@ async function openDetail(slug) {
   panelSettings = settings || {};
   renderDetail(p, photos, panelSettings);
 
+  // Async: update "N in pool" badge (non-fatal)
+  api('GET', '/pool').then(data => {
+    const el = document.getElementById(`from-pool-count-${slug}`);
+    if (el && data.processed.length) el.textContent = `${data.processed.length} in pool`;
+  }).catch(() => {});
+
   // Populate the "Attach a post" dropdown (non-fatal)
   try {
     const allPosts = await api('GET', '/posts');
@@ -892,6 +968,12 @@ function renderDetail(p, photos, settings) {
       <p>Click to choose files · or drag & drop · JPG, PNG, WEBP, AVIF</p>
       <input type="file" id="file-${p.slug}" accept="image/*" multiple style="display:none"
              onchange="uploadFiles(this.files,'${p.slug}')">
+    </div>
+
+    <!-- Add from pool shortcut -->
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <button class="btn-outline" onclick="openPoolPicker('${p.slug}')">Add from pool →</button>
+      <span id="from-pool-count-${p.slug}" style="font-size:12px;color:var(--muted)"></span>
     </div>
 
     <!-- Metadata -->
@@ -1449,7 +1531,7 @@ async function openPhotoPicker() {
   select.innerHTML = '<option value="">Select series…</option>';
   try {
     const projs = await api('GET', '/projects');
-    projs.forEach(p => {
+    projs.filter(p => p.slug !== '_pool').forEach(p => {
       const opt = document.createElement('option');
       opt.value = p.slug;
       opt.textContent = p.title || p.slug;
@@ -1636,10 +1718,323 @@ function closeIfBackdrop(e, id) { if (e.target === document.getElementById(id)) 
 
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
-  ['overlay-detail','overlay-new','overlay-settings','overlay-post','overlay-photo-picker'].forEach(id => {
+  ['overlay-detail','overlay-new','overlay-settings','overlay-post','overlay-photo-picker','overlay-pool-picker'].forEach(id => {
     if (!document.getElementById(id).classList.contains('hidden')) closeSheet(id);
   });
 });
+
+// ── Pool tab ──────────────────────────────────────────────────────
+let poolData = { raw: [], processed: [] };
+let poolSelectedIds = new Set();
+
+async function loadPool() {
+  document.getElementById('pool-grid').innerHTML =
+    `<div class="empty" style="grid-column:1/-1;border:1px solid var(--border-light)">Loading…</div>`;
+  try {
+    poolData = await api('GET', '/pool');
+    renderPoolGrid();
+    updatePoolRawStatus();
+    poolSelectedIds = new Set();
+    updatePoolMoveBar();
+  } catch(e) {
+    document.getElementById('pool-grid').innerHTML =
+      `<div class="empty" style="grid-column:1/-1;border:1px solid var(--border-light)">Failed to load — ${esc(e.message)}</div>`;
+  }
+}
+
+function updatePoolRawStatus() {
+  const el = document.getElementById('pool-raw-status');
+  if (!el) return;
+  const n = poolData.raw.length;
+  el.textContent = n === 0 ? 'No raw photos waiting' : `${n} raw photo${n !== 1 ? 's' : ''} waiting`;
+}
+
+function renderPoolGrid() {
+  const grid = document.getElementById('pool-grid');
+  if (!grid) return;
+  const { raw, processed } = poolData;
+  if (!raw.length && !processed.length) {
+    grid.innerHTML = `<div class="empty" style="grid-column:1/-1;border:1px solid var(--border-light)">Pool is empty — drop photos above to get started.</div>`;
+    return;
+  }
+  grid.innerHTML = [
+    ...processed.map(p => `
+      <div class="pool-tile${poolSelectedIds.has(p.id) ? ' pool-tile-selected' : ''}" id="pool-tile-${esc(p.id)}" onclick="togglePoolSelect('${esc(p.id)}',this)">
+        <img src="/assets/${esc(p.key)}/600.jpg" loading="lazy" onerror="this.style.display='none'">
+        <div class="pool-tile-label">${esc(p.caption || p.id)}</div>
+        <div class="pool-tile-actions">
+          <span class="pool-check" id="pool-check-${esc(p.id)}">${poolSelectedIds.has(p.id) ? '☑' : '☐'}</span>
+          <button class="btn-icon" style="font-size:10px;color:var(--red)" onclick="event.stopPropagation();discardPoolPhoto('${esc(p.id)}')">✕</button>
+        </div>
+      </div>
+    `),
+    ...raw.map(r => `
+      <div class="pool-tile pool-tile-raw">
+        <div class="pool-tile-raw-body">
+          <div style="font-size:11px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.filename)}</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px">${r.width && r.height ? r.width+'×'+r.height : '—'}</div>
+          <div style="font-size:10px;color:var(--muted)">${r.uploadedAt ? new Date(r.uploadedAt).toLocaleDateString() : ''}</div>
+        </div>
+        <div style="padding:0 8px 8px">
+          <button class="btn-icon" style="font-size:10px;color:var(--red);width:100%" onclick="discardRawPool('${esc(r.pid)}')">Discard</button>
+        </div>
+      </div>
+    `),
+  ].join('');
+}
+
+function togglePoolSelect(id, el) {
+  if (poolSelectedIds.has(id)) {
+    poolSelectedIds.delete(id);
+    el.classList.remove('pool-tile-selected');
+    const ck = document.getElementById(`pool-check-${id}`);
+    if (ck) ck.textContent = '☐';
+  } else {
+    poolSelectedIds.add(id);
+    el.classList.add('pool-tile-selected');
+    const ck = document.getElementById(`pool-check-${id}`);
+    if (ck) ck.textContent = '☑';
+  }
+  updatePoolMoveBar();
+}
+
+function updatePoolMoveBar() {
+  const bar = document.getElementById('pool-move-bar');
+  if (!bar) return;
+  const n = poolSelectedIds.size;
+  bar.classList.toggle('hidden', n === 0);
+  const lbl = document.getElementById('pool-move-label');
+  if (lbl) lbl.textContent = `${n} selected`;
+
+  const sel = document.getElementById('pool-move-target');
+  if (sel && !sel.dataset.populated) {
+    sel.innerHTML = '<option value="">Select series…</option>';
+    projects.filter(p => p.slug !== '_pool').forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.slug;
+      opt.textContent = p.title || p.slug;
+      sel.appendChild(opt);
+    });
+    sel.dataset.populated = '1';
+  }
+}
+
+async function moveSelectedFromPool() {
+  const ids = [...poolSelectedIds];
+  if (!ids.length) return;
+  const slug = document.getElementById('pool-move-target').value;
+  if (!slug) { toast('Select a series first', true); return; }
+
+  const BATCH = 5;
+  let totalMoved = 0;
+  for (let i = 0; i < ids.length; i += BATCH) {
+    try {
+      const res = await api('POST', `/projects/${slug}/photos/from-pool`, { ids: ids.slice(i, i + BATCH) });
+      totalMoved += (res.moved || []).length;
+    } catch(e) { toast('Move failed: ' + e.message, true); break; }
+  }
+
+  if (totalMoved > 0) {
+    toast(`Moved ${totalMoved} photo${totalMoved !== 1 ? 's' : ''} to ${slug}`);
+    setRebuildStatus('dirty', 'Rebuild needed');
+    poolSelectedIds.clear();
+    const sel = document.getElementById('pool-move-target');
+    if (sel) delete sel.dataset.populated;
+    await loadPool();
+  }
+}
+
+async function uploadToPool(files) {
+  if (!files.length) return;
+  const zone = document.getElementById('pool-drop-zone');
+  const total = files.length;
+  let succeeded = 0, failed = 0;
+
+  for (let i = 0; i < total; i++) {
+    const file = files[i];
+    zone.innerHTML = `<strong><span class="spin">↻</span> Uploading ${i + 1} of ${total}…</strong><p>Photos will appear below once uploaded</p>`;
+    let ready;
+    try { ready = await resizeForUpload(file); }
+    catch(e) { failed++; toast(`Skipped ${file.name}: ${e.message}`, true); continue; }
+
+    const fd = new FormData();
+    fd.append('photos', ready);
+    try { await api('POST', '/pool', fd, true); succeeded++; }
+    catch(e) { failed++; toast(`Failed ${file.name}: ${e.message}`, true); }
+  }
+
+  zone.innerHTML = `<strong>Drop photos into the pool</strong><p>Upload instantly — process and assign to a series later · JPG, PNG, WEBP, AVIF</p>`;
+  if (failed === 0) toast(`${succeeded} photo${succeeded !== 1 ? 's' : ''} added to pool`);
+  else toast(`${succeeded} added, ${failed} failed`, failed > 0);
+  await loadPool();
+}
+
+function dropToPool(event, el) {
+  event.preventDefault();
+  el.classList.remove('drag');
+  uploadToPool(event.dataTransfer.files);
+}
+
+async function processPool() {
+  const statusEl = document.getElementById('pool-process-status');
+  const rawStatusEl = document.getElementById('pool-raw-status');
+  const btn = document.querySelector('#tab-pool .btn-action');
+  if (btn) { btn.disabled = true; btn.textContent = '⟳ Processing…'; }
+
+  let totalProcessed = 0;
+  let remaining = Infinity;
+  let loops = 0;
+
+  try {
+    while (remaining > 0 && loops < 20) {
+      const res = await api('POST', '/pool/process');
+      totalProcessed += res.processed || 0;
+      remaining = res.remaining ?? 0;
+      loops++;
+      if (statusEl) statusEl.textContent = remaining > 0
+        ? `Processed ${totalProcessed}, ${remaining} remaining…`
+        : `Processed ${totalProcessed} photo${totalProcessed !== 1 ? 's' : ''}`;
+    }
+    if (totalProcessed > 0) {
+      setRebuildStatus('dirty', 'Rebuild needed');
+      toast(`Processed ${totalProcessed} photo${totalProcessed !== 1 ? 's' : ''}`);
+    } else {
+      toast('Nothing to process');
+    }
+    await loadPool();
+  } catch(e) {
+    toast('Processing failed: ' + e.message, true);
+    if (statusEl) statusEl.textContent = 'Processing failed';
+  }
+
+  if (btn) { btn.disabled = false; btn.textContent = 'Process pool →'; }
+  if (statusEl && totalProcessed > 0) setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 4000);
+}
+
+async function discardRawPool(pid) {
+  if (!confirm('Discard this unprocessed photo?')) return;
+  try {
+    await api('DELETE', `/pool/raw/${pid}`);
+    poolData.raw = poolData.raw.filter(r => r.pid !== pid);
+    renderPoolGrid();
+    updatePoolRawStatus();
+    toast('Discarded');
+  } catch(e) { toast('Failed: ' + e.message, true); }
+}
+
+async function discardPoolPhoto(id) {
+  if (!confirm('Discard this processed photo from the pool?')) return;
+  try {
+    await api('DELETE', `/pool/${id}`);
+    poolData.processed = poolData.processed.filter(p => p.id !== id);
+    poolSelectedIds.delete(id);
+    renderPoolGrid();
+    updatePoolMoveBar();
+    setRebuildStatus('dirty', 'Rebuild needed');
+    toast('Discarded');
+  } catch(e) { toast('Failed: ' + e.message, true); }
+}
+
+// ── Pool picker (for "Add from pool" in series detail) ────────────────────
+let currentPoolPickerSlug = null;
+let poolPickerSelectedIds = new Set();
+
+async function openPoolPicker(slug) {
+  currentPoolPickerSlug = slug;
+  poolPickerSelectedIds = new Set();
+  const grid = document.getElementById('pool-picker-grid');
+  const btn = document.getElementById('pool-picker-add-btn');
+  btn.disabled = true; btn.style.opacity = '.4'; btn.style.pointerEvents = 'none';
+  btn.textContent = 'Add to series →';
+  grid.innerHTML = '<span style="font-size:12px;color:var(--muted)">Loading…</span>';
+  openSheet('overlay-pool-picker');
+  try {
+    const data = await api('GET', '/pool');
+    const processed = data.processed || [];
+    if (!processed.length) {
+      grid.innerHTML = '<span style="font-size:12px;color:var(--muted)">No processed photos in pool. Upload and process photos in the Pool tab first.</span>';
+      return;
+    }
+    grid.innerHTML = '';
+    processed.forEach(p => {
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'position:relative;cursor:pointer';
+      wrap.dataset.id = p.id;
+      wrap.onclick = () => togglePoolPickerPhoto(p.id, wrap);
+
+      const img = document.createElement('img');
+      img.src = `/assets/${p.key}/600.jpg`;
+      img.loading = 'lazy';
+      img.style.cssText = 'width:100%;aspect-ratio:1;object-fit:cover;border-radius:2px;border:2px solid transparent;display:block;transition:border-color .1s';
+      img.onerror = () => { img.style.display = 'none'; };
+
+      const label = document.createElement('div');
+      label.style.cssText = 'font-size:10px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+      label.textContent = p.caption || p.id;
+
+      wrap.appendChild(img);
+      wrap.appendChild(label);
+      grid.appendChild(wrap);
+    });
+  } catch(e) {
+    grid.innerHTML = `<span style="font-size:12px;color:var(--red)">Failed to load pool: ${esc(e.message)}</span>`;
+  }
+}
+
+function togglePoolPickerPhoto(id, el) {
+  const img = el.querySelector('img');
+  if (poolPickerSelectedIds.has(id)) {
+    poolPickerSelectedIds.delete(id);
+    if (img) img.style.borderColor = 'transparent';
+  } else {
+    poolPickerSelectedIds.add(id);
+    if (img) img.style.borderColor = 'var(--green)';
+  }
+  const btn = document.getElementById('pool-picker-add-btn');
+  const n = poolPickerSelectedIds.size;
+  btn.disabled = n === 0;
+  btn.style.opacity = n === 0 ? '.4' : '';
+  btn.style.pointerEvents = n === 0 ? 'none' : '';
+  btn.textContent = n === 0 ? 'Add to series →' : `Add ${n} to series →`;
+}
+
+async function confirmPoolPickerMove() {
+  const slug = currentPoolPickerSlug;
+  if (!slug || !poolPickerSelectedIds.size) return;
+  const ids = [...poolPickerSelectedIds];
+
+  const BATCH = 5;
+  let allMoved = [];
+  for (let i = 0; i < ids.length; i += BATCH) {
+    try {
+      const res = await api('POST', `/projects/${slug}/photos/from-pool`, { ids: ids.slice(i, i + BATCH) });
+      allMoved = allMoved.concat(res.moved || []);
+    } catch(e) { toast('Move failed: ' + e.message, true); break; }
+  }
+
+  if (allMoved.length) {
+    closeSheet('overlay-pool-picker');
+    setRebuildStatus('dirty', 'Rebuild needed');
+    toast(`Added ${allMoved.length} photo${allMoved.length !== 1 ? 's' : ''} to series`);
+
+    // Refresh series detail
+    const p = projects.find(x => x.slug === slug);
+    if (p) {
+      const [photos, settings] = await Promise.all([
+        api('GET', `/projects/${slug}/photos`).catch(() => []),
+        api('GET', '/settings').catch(() => ({})),
+      ]);
+      panelSettings = settings || {};
+      renderDetail(p, photos, panelSettings);
+    }
+
+    // Refresh pool count badge
+    api('GET', '/pool').then(data => {
+      const el = document.getElementById(`from-pool-count-${slug}`);
+      if (el) el.textContent = data.processed.length ? `${data.processed.length} in pool` : '';
+    }).catch(() => {});
+  }
+}
 
 // ── Util ──────────────────────────────────────────────────────────
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }

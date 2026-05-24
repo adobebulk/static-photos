@@ -150,7 +150,7 @@ Publishing photos happens through the **admin UI** (at `photos.ctsmith.org/admin
 
 ## Versioning
 
-Source of truth is `package.json`. When bumping the version, update `package.json` **and** `wrangler.toml [vars] PACKAGE_VERSION` together. `site/data/version.yaml` is generated at build time by `scripts/write-version.js` — do not commit it (it is gitignored). Current version: **1.4.1**
+Source of truth is `package.json`. When bumping the version, update `package.json` **and** `wrangler.toml [vars] PACKAGE_VERSION` together. `site/data/version.yaml` is generated at build time by `scripts/write-version.js` — do not commit it (it is gitignored). Current version: **1.5.0**
 
 ---
 
@@ -215,6 +215,19 @@ Full markdown body here...
 
 Staging helpers in `functions/_lib/staging.js`: `getStagedPostSlugs`, `isStagedPostDeleted`.
 
+### Photo pool (`POOL_SLUG = "_pool"`)
+
+A permanent, never-published special series that acts as a staging area for bulk photo drops. Not visible in the public site (always `draft: true`) and excluded from the Series list in the admin.
+
+**Two storage phases:**
+
+- **Raw** (instant on drop, no processing): `ORIGINALS_BUCKET: _pool/raw/<pid>/original.jpg` with `customMetadata { filename, width, height, uploadedAt, status: "raw" }`. `pid` is `crypto.randomUUID()`.
+- **Processed** (after `POST /api/pool/process`): variants live in `ASSETS_BUCKET: _pool/<id>/600.avif` etc., original in `ORIGINALS_BUCKET: _pool/<id>/original.jpg`. `id` is sequential (001, 002, …) via `nextPhotoId()`. Manifest entry in `site/content/projects/_pool/_index.md` staged to `_pending/` — becomes part of GitHub on next Rebuild.
+
+**Move** copies variants/original to the target series key prefix (R2 get+put+delete — no server-side rename) and updates both manifests. No re-processing.
+
+**Background processing:** `POST /api/pool/process` is the single endpoint for both the "Process pool" button and any external scheduler. It processes up to `limit` (default 6) raw photos per call and returns `{ processed, remaining }`. The admin loops until `remaining === 0`. For a cron-driven auto-processing Worker, see TODO in Known Issues below.
+
 ### Site settings (`site/data/settings.yaml`)
 
 ```yaml
@@ -251,8 +264,14 @@ featured: []          # ordered list of { type: "series"|"post"|"photo", slug, l
 | DELETE | `/api/posts/:slug` | Delete post |
 | POST | `/api/posts/:slug/publish` | Toggle draft `{ draft: bool }` |
 | GET | `/api/version` | Returns `{ version }` from `PACKAGE_VERSION` env var |
+| POST | `/api/pool` | Drop raw photos instantly `multipart/form-data photos[]` → ORIGINALS_BUCKET `_pool/raw/<pid>/` — no resize |
+| GET | `/api/pool` | List pool `{ raw: [...], processed: [...] }` — raw from R2 list, processed from pool manifest |
+| POST | `/api/pool/process` | Process raw → variants via Transform via Workers → ASSETS_BUCKET `_pool/<id>/`; accepts `{ limit }` (default 6); returns `{ processed, remaining }` |
+| DELETE | `/api/pool/raw/:pid` | Discard an unprocessed raw drop |
+| DELETE | `/api/pool/:id` | Discard a processed pool photo (all R2 objects + manifest entry) |
+| POST | `/api/projects/:slug/photos/from-pool` | Move processed pool photos into a series `{ ids: [...] }` — copy variants/original (no re-processing), update both manifests |
 
-All routes implemented in `functions/api/[[route]].js`. Write routes stage to `_pending/` (ORIGINALS_BUCKET); `POST /api/rebuild` calls `flushStaging()` then pings the deploy hook.
+All routes implemented in `functions/api/[[route]].js`. Write routes stage to `_pending/` (ORIGINALS_BUCKET); `POST /api/rebuild` calls `flushStaging()` then pings the deploy hook. Pool manifest changes are staged on `process` and `from-pool` — they reach GitHub on the next Rebuild.
 
 ---
 
@@ -267,6 +286,7 @@ All routes implemented in `functions/api/[[route]].js`. Write routes stage to `_
 - **Per-photo permalink** (`projects/single.html`): `/projects/<slug>/<id>/` — "← Series Title" back link at top; photo is wrapped in a PhotoSwipe anchor (single-item gallery, same CDN and init pattern as series page); prev/next navigation between photos in the series; conditional download link; optional `body` rendered as markdown below.
 - **Posts list** (`posts/list.html`): `/posts/` — published posts with title, date, excerpt.
 - **Post page** (`posts/single.html`): full-width readable layout, `{{ .Content }}` rendered by Hugo.
+- **Pool exclusion:** The `_pool` series is permanently `draft: true`. Both homepage and series-listing templates filter with `"Params.draft" "ne" true`, so `_pool` never renders publicly. `GET /api/projects` also filters `POOL_SLUG` server-side so `_pool` never appears in the admin Series list.
 - Run Hugo as `hugo --source site` from repo root.
 
 ---
@@ -309,12 +329,22 @@ During local `wrangler pages dev`, logs print to the terminal.
 
 - [ ] Phase 0: wire Cloudflare/GitHub account bindings for production (see RUNBOOK.md).
 - [ ] Admin UI: drag-to-reorder photos (currently up/down arrows; pointer drag would be smoother).
+- [ ] Pool: presigned direct-to-R2 upload (bypass Worker for drop path; needs `aws4fetch` + `R2_ACCESS_KEY_ID`/`R2_SECRET_ACCESS_KEY` secrets against the `*.r2.cloudflarestorage.com` S3 endpoint).
+- [ ] Pool: companion cron Worker with a `scheduled()` handler that calls `POST /api/pool/process` on a timer for true drop-and-go (Pages Functions don't expose `scheduled`; a separate Worker with its own R2 bindings + a Cloudflare Access service token is the recommended path).
 
 ---
 
-## Current state (last updated: 2026-05-23)
+## Current state (last updated: 2026-05-24)
 
-### v1.4.1 — CURRENT
+### v1.5.0 — CURRENT
+- Feature: **Photo Pool** — a permanent draft series (`_pool`) used as a staging area for bulk photo drops
+  - Admin **Pool tab**: drop zone (raw instant upload via `POST /api/pool`), "Process pool →" button (calls `POST /api/pool/process` looping until `remaining === 0`), grid showing raw tiles (filename, dimensions, Discard) and processed tiles (thumbnail, select checkbox, Discard)
+  - Move action bar: select processed pool photos → choose target series → Move; batched in groups of 5 to stay within subrequest budget
+  - **"Add from pool →"** button in series detail panel opens a multi-select picker of processed pool photos; moves selected photos into the current series (no re-processing — variants are copied via R2 get+put+delete)
+  - Pool excluded from Series list (server-side filter) and from public site (`draft: true` + existing Hugo draft filter)
+  - Six new API routes: `POST/GET /api/pool`, `POST /api/pool/process`, `DELETE /api/pool/raw/:pid`, `DELETE /api/pool/:id`, `POST /api/projects/:slug/photos/from-pool`
+
+### v1.4.1
 - Fix: `getFile()` in `github.js` now decodes GitHub's base64 content through `TextDecoder`, preventing UTF-8 multi-byte characters (curly quotes, em dashes, etc.) from being corrupted to Latin-1 garbage on re-edit after rebuild
 
 ### v1.4.0
