@@ -96,6 +96,7 @@ photos:
     height: 4000
     caption: ''
     downloadable: false
+    body: El Pais Grande del Sur
   - id: '032'
     key: portfolio/032
     width: 6000
@@ -121,6 +122,7 @@ photos:
     caption: ''
     downloadable: false
 ---
+
 
 
 
