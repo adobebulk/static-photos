@@ -243,6 +243,7 @@ export async function onRequest(ctx) {
             draft:       data.draft       ?? true,
             cover:       data.cover       ?? "",
             photoCount:  (data.photos     ?? []).length,
+            seriesPosts: data.seriesPosts ?? [],
           };
         })
       )).filter(Boolean);
@@ -506,7 +507,7 @@ export async function onRequest(ctx) {
       const manifest = await readManifest(env, slug);
       if (!manifest) return err("series not found", 404);
 
-      const updatableFields = ["title", "description", "cover", "draft", "downloadsDefault"];
+      const updatableFields = ["title", "description", "cover", "draft", "downloadsDefault", "seriesPosts"];
       const updatedData = { ...manifest.data };
       for (const f of updatableFields) {
         if (body[f] !== undefined) updatedData[f] = body[f];

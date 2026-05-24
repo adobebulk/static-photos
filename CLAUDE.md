@@ -150,7 +150,7 @@ Publishing photos happens through the **admin UI** (at `photos.ctsmith.org/admin
 
 ## Versioning
 
-Source of truth is `package.json`. When bumping the version, update `package.json` **and** `wrangler.toml [vars] PACKAGE_VERSION` together. `site/data/version.yaml` is generated at build time by `scripts/write-version.js` — do not commit it (it is gitignored). Current version: **1.3.3**
+Source of truth is `package.json`. When bumping the version, update `package.json` **and** `wrangler.toml [vars] PACKAGE_VERSION` together. `site/data/version.yaml` is generated at build time by `scripts/write-version.js` — do not commit it (it is gitignored). Current version: **1.4.0**
 
 ---
 
@@ -177,6 +177,9 @@ photos:
     body: |                  # optional long-form markdown; shown on per-photo permalink
       The light at 2am was unlike anything I'd seen.
     downloadable: true       # per-photo override of downloadsDefault
+seriesPosts:               # optional list of posts attached to this series
+  - slug: "my-trip-report"
+    label: ""              # optional display override; falls back to post title
 ---
 ```
 
@@ -311,7 +314,11 @@ During local `wrangler pages dev`, logs print to the terminal.
 
 ## Current state (last updated: 2026-05-23)
 
-### v1.3.3 — CURRENT
+### v1.4.0 — CURRENT
+- Feature: series manifests now support `seriesPosts: [{slug, label}]` — posts attached to a series are shown as a "Related writing" section below the photo grid on the series page (draft posts and missing slugs are silently skipped)
+- Admin: "Related writing" section in series detail panel — attach/detach published posts; attach dropdown excludes already-attached posts; `GET /api/projects` now returns `seriesPosts` per series; `PATCH /api/projects/:slug` now accepts `seriesPosts`
+
+### v1.3.3
 - Fix: "Featured" badge on post cards now reads from `settings.featured[]` (the source of truth) instead of post front matter — deselecting a post in Settings now immediately clears the badge
 
 ### v1.3.2

@@ -831,6 +831,23 @@ async function openDetail(slug) {
   ]);
   panelSettings = settings || {};
   renderDetail(p, photos, panelSettings);
+
+  // Populate the "Attach a post" dropdown (non-fatal)
+  try {
+    const allPosts = await api('GET', '/posts');
+    const select = document.getElementById(`series-post-select-${slug}`);
+    if (select) {
+      const attached = (p.seriesPosts || []).map(sp => sp.slug);
+      allPosts
+        .filter(post => !post.draft && !attached.includes(post.slug))
+        .forEach(post => {
+          const opt = document.createElement('option');
+          opt.value = post.slug;
+          opt.textContent = post.title || post.slug;
+          select.appendChild(opt);
+        });
+    }
+  } catch(_) {}
 }
 
 function renderDetail(p, photos, settings) {
@@ -896,6 +913,20 @@ function renderDetail(p, photos, settings) {
         <button class="btn-outline" onclick="setHero('${p.slug}')">Set as hero</button>
         ${thisSeriesIsHero ? `<button class="btn-outline" style="color:var(--muted)" onclick="clearHero()">Clear hero</button>` : ''}
         ${currentHeroKey && !thisSeriesIsHero ? `<span style="font-size:11px;color:var(--muted)">Current hero: ${esc(currentHeroKey)}</span>` : ''}
+      </div>
+    </div>
+
+    <!-- Related posts -->
+    <div style="display:flex;flex-direction:column;gap:8px;padding-top:16px;border-top:1px solid var(--border-light)">
+      <div style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">Related writing</div>
+      <div id="series-posts-list-${p.slug}" style="display:flex;flex-direction:column;gap:6px">
+        ${renderSeriesPostsList(p.slug, p.seriesPosts || [])}
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px">
+        <select id="series-post-select-${p.slug}" style="font-family:var(--mono);font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:2px;background:var(--bg);color:var(--text);flex:1;min-width:0">
+          <option value="">Attach a post…</option>
+        </select>
+        <button class="btn-outline" onclick="attachPostToSeries('${p.slug}')">Attach →</button>
       </div>
     </div>
 
@@ -1014,6 +1045,67 @@ async function unfeaturePhoto(slug, id) {
     if (el) el.innerHTML = featureBtnHTML(slug, id);
     toast('Removed from featured — rebuild to publish');
     setRebuildStatus('dirty', 'Rebuild needed');
+  } catch(e) { toast('Failed: ' + e.message, true); }
+}
+
+// ── Series-attached posts ─────────────────────────────────────────
+function renderSeriesPostsList(seriesSlug, seriesPosts) {
+  if (!seriesPosts.length) {
+    return '<span style="font-size:12px;color:var(--muted)">No posts attached yet.</span>';
+  }
+  return seriesPosts.map(sp => `
+    <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid var(--border-light);border-radius:2px;font-size:12px">
+      <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--mono)">${esc(sp.slug)}</span>
+      ${sp.label ? `<span style="color:var(--muted)">${esc(sp.label)}</span>` : ''}
+      <button class="btn-icon" style="font-size:11px;color:var(--red)" onclick="detachPostFromSeries('${esc(seriesSlug)}','${esc(sp.slug)}')">✕</button>
+    </div>
+  `).join('');
+}
+
+async function attachPostToSeries(seriesSlug) {
+  const select = document.getElementById(`series-post-select-${seriesSlug}`);
+  const postSlug = select.value;
+  if (!postSlug) { toast('Select a post first', true); return; }
+
+  const p = projects.find(x => x.slug === seriesSlug);
+  if (!p) return;
+  const current = Array.isArray(p.seriesPosts) ? p.seriesPosts : [];
+  if (current.some(sp => sp.slug === postSlug)) { toast('Already attached'); return; }
+
+  const updated = [...current, { slug: postSlug, label: '' }];
+  try {
+    await api('PATCH', `/projects/${seriesSlug}`, { seriesPosts: updated });
+    p.seriesPosts = updated;
+    document.getElementById(`series-posts-list-${seriesSlug}`).innerHTML =
+      renderSeriesPostsList(seriesSlug, updated);
+    // Remove attached post from dropdown
+    const opt = select.querySelector(`option[value="${postSlug}"]`);
+    if (opt) opt.remove();
+    select.value = '';
+    setRebuildStatus('dirty', 'Rebuild needed');
+    toast('Post attached — rebuild to publish');
+  } catch(e) { toast('Failed: ' + e.message, true); }
+}
+
+async function detachPostFromSeries(seriesSlug, postSlug) {
+  const p = projects.find(x => x.slug === seriesSlug);
+  if (!p) return;
+  const updated = (p.seriesPosts || []).filter(sp => sp.slug !== postSlug);
+  try {
+    await api('PATCH', `/projects/${seriesSlug}`, { seriesPosts: updated });
+    p.seriesPosts = updated;
+    document.getElementById(`series-posts-list-${seriesSlug}`).innerHTML =
+      renderSeriesPostsList(seriesSlug, updated);
+    // Add the post back to the dropdown
+    const select = document.getElementById(`series-post-select-${seriesSlug}`);
+    if (select) {
+      const opt = document.createElement('option');
+      opt.value = postSlug;
+      opt.textContent = postSlug;
+      select.appendChild(opt);
+    }
+    setRebuildStatus('dirty', 'Rebuild needed');
+    toast('Post detached — rebuild to publish');
   } catch(e) { toast('Failed: ' + e.message, true); }
 }
 
