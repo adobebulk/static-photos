@@ -7,7 +7,7 @@
  *   _pending/deletes/{github-path} → "1"  (mark for deletion)
  */
 
-import { commitFiles } from "./github.js";
+import { commitFiles, getFile } from "./github.js";
 
 /** Stage a file write. Removes any pending-delete for the same path. */
 export async function stageFile(bucket, path, content) {
@@ -99,13 +99,22 @@ export async function flushStaging(bucket, token, repo) {
     key.slice("_pending/deletes/".length)
   );
 
-  await commitFiles({ token, repo,
-    message: "content: publish staged changes", files, deletions });
+  // Skip deletions for paths that don't exist in GitHub — sending sha:null for a
+  // path GitHub has never seen causes a 422 GitRPC::BadObjectState error.
+  const existingDeletions = (
+    await Promise.all(
+      deletions.map(async (path) => ((await getFile(token, repo, path)) ? path : null))
+    )
+  ).filter(Boolean);
 
+  await commitFiles({ token, repo,
+    message: "content: publish staged changes", files, deletions: existingDeletions });
+
+  // Always clear ALL staging (including phantom deletes that were skipped).
   await Promise.all([
     ...filesList.objects.map(  ({ key }) => bucket.delete(key)),
     ...deletesList.objects.map(({ key }) => bucket.delete(key)),
   ]);
 
-  return { files: files.length, deletions: deletions.length };
+  return { files: files.length, deletions: existingDeletions.length };
 }

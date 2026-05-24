@@ -150,7 +150,7 @@ Publishing photos happens through the **admin UI** (at `photos.ctsmith.org/admin
 
 ## Versioning
 
-Source of truth is `package.json`. When bumping the version, update `package.json` **and** `wrangler.toml [vars] PACKAGE_VERSION` together. `site/data/version.yaml` is generated at build time by `scripts/write-version.js` — do not commit it (it is gitignored). Current version: **1.5.0**
+Source of truth is `package.json`. When bumping the version, update `package.json` **and** `wrangler.toml [vars] PACKAGE_VERSION` together. `site/data/version.yaml` is generated at build time by `scripts/write-version.js` — do not commit it (it is gitignored). Current version: **1.5.1**
 
 ---
 
@@ -336,7 +336,10 @@ During local `wrangler pages dev`, logs print to the terminal.
 
 ## Current state (last updated: 2026-05-24)
 
-### v1.5.0 — CURRENT
+### v1.5.1 — CURRENT
+- Fix: Rebuild no longer fails with `422 GitRPC::BadObjectState` when staged deletions reference paths that never reached GitHub. `flushStaging()` now checks each pending deletion against the GitHub Contents API and silently skips phantom deletes (pool stubs born and removed entirely within staging). All staging is cleared regardless, so no phantom deletes linger.
+
+### v1.5.0
 - Feature: **Photo Pool** — a permanent draft series (`_pool`) used as a staging area for bulk photo drops
   - Admin **Pool tab**: drop zone (raw instant upload via `POST /api/pool`), "Process pool →" button (calls `POST /api/pool/process` looping until `remaining === 0`), grid showing raw tiles (filename, dimensions, Discard) and processed tiles (thumbnail, select checkbox, Discard)
   - Move action bar: select processed pool photos → choose target series → Move; batched in groups of 5 to stay within subrequest budget
