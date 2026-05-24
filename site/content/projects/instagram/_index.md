@@ -151,9 +151,8 @@ photos:
     height: 2456
     caption: ''
     downloadable: false
-seriesPosts:
-  - slug: above-the-valley
-    label: ''
+seriesPosts: []
 ---
+
 
 

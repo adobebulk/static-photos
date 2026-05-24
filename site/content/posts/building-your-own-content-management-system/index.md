@@ -2,17 +2,27 @@
 title: Building My own Content Management System
 date: '2026-05-23'
 draft: false
-featured: true
+featured: false
 excerpt: Basalt - a custom content management system
 ---
 
 
 
 
-## Static Websites and Managing Content
-A dream photo website has always been: incredibly fast, visually simple and easy to see the artwork, and manageable everywhere. 
 
-I built my own system for just that, which I call *Basalt*. Basalt uses Hugo as a foundation for the static site. And there is a sensible backend as well to manage posts, trigger builds. Along the way, I built a robust pipeline for image uploads via bulk. Rolling more features out soon while testing.
+
+## Static Websites and Managing Content
+A dream photo website has always been something which is incredibly fast, visually simple and easy to see the artwork, and manageable everywhere in a flash. 
+
+I built my own system for just that, which I call *Basalt*. 
+
+*Basalt* is a small engine which manages a static website via a small administrative panel, managing edits, uploads, builds as all in one. 
+
+The architecture uses Hugo as a foundation for the static site and GitHub and Cloudflare for the code base, build, and hosting. 
+
+Hugo is great because it is well developed and provides a robust architecture for static website presentation and structure. But the issue has always been the handoff between editing and compiling. There are a few options out there for content management systems for Hugo, but they’re sticky and on some cost ladder. *Basalt* is the answer tailored to my specific needs. Built with a pipeline for bulk uploads and a sensible admin panel for uploads and management everywhere, this system uses some of the cheap and easy to use features from Cloudflare in concert with our Hugo frontend. And a key feature is the codebase is managed with GitHub, but the heavy pictures are excluded from GitHub. We rely on the seamless help of workers from Cloudflare to resize and serve our images after they’re uploaded.  
+
+So in the end, we have a compiled static site on the front for snappy viewing experience paired with a simple backend to edit, trigger builds, and manage content on the back. Designed for on the go and microscopic overhead. 
 
 https://github.com/adobebulk/basalt
 
