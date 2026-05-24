@@ -16,6 +16,7 @@ excerpt: Basalt - a custom content management system
 
 
 
+
 ## Static Websites and Managing Content
 ![024](/assets/instagram/024/600.jpg)
 
@@ -32,9 +33,4 @@ Hugo is great because it is well developed and provides a robust architecture fo
 So in the end, we have a compiled static site on the front for snappy viewing experience paired with a simple backend to edit, trigger builds, and manage content on the back. Designed for on the go and microscopic overhead. 
 
 https://github.com/adobebulk/basalt
-
-![002](/assets/draft-stock/002/600.jpg)
-![004](/assets/draft-stock/004/600.jpg)
-![003](/assets/draft-stock/003/600.jpg)
-![001](/assets/draft-stock/001/600.jpg)
 
