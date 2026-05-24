@@ -150,7 +150,7 @@ Publishing photos happens through the **admin UI** (at `photos.ctsmith.org/admin
 
 ## Versioning
 
-Source of truth is `package.json`. When bumping the version, update `package.json` **and** `wrangler.toml [vars] PACKAGE_VERSION` together. `site/data/version.yaml` is generated at build time by `scripts/write-version.js` — do not commit it (it is gitignored). Current version: **1.2.3**
+Source of truth is `package.json`. When bumping the version, update `package.json` **and** `wrangler.toml [vars] PACKAGE_VERSION` together. `site/data/version.yaml` is generated at build time by `scripts/write-version.js` — do not commit it (it is gitignored). Current version: **1.3.0**
 
 ---
 
@@ -311,7 +311,12 @@ During local `wrangler pages dev`, logs print to the terminal.
 
 ## Current state (last updated: 2026-05-23)
 
-### v1.2.3 — CURRENT
+### v1.3.0 — CURRENT
+- Admin: "Feature on homepage" checkbox in post editor now syncs to `settings.featured[]` (the real source of truth for the homepage); `openEditPost` reads featured state from settings, not post front matter
+- Admin: photo embed in post body — "⊕ Insert photo" button opens a series/photo picker that inserts markdown image syntax at cursor position
+- Admin: mobile topbar now stacks (brand row above buttons row) on ≤480px; SLUG column hidden in series table on mobile
+
+### v1.2.3
 - Hero image: caption overlay from photo manifest; click always goes to photo permalink (derived from `heroPhotoKey`, not `heroLink`)
 - Photo permalink page: "← Series Title" back link; clicking the photo opens PhotoSwipe (single-item gallery, same pattern as series page); prev/next navigation
 - Admin: feature button on every photo card shows live state ("Featured ✓" badge + "Remove" when featured, "✦ Feature" when not); in-place UI update on toggle without panel reload; `panelSettings` cached per panel open; caption helper text below caption input
