@@ -150,7 +150,7 @@ Publishing photos happens through the **admin UI** (at `photos.ctsmith.org/admin
 
 ## Versioning
 
-Source of truth is `package.json`. When bumping the version, update `package.json` **and** `wrangler.toml [vars] PACKAGE_VERSION` together. `site/data/version.yaml` is generated at build time by `scripts/write-version.js` — do not commit it (it is gitignored). Current version: **1.3.1**
+Source of truth is `package.json`. When bumping the version, update `package.json` **and** `wrangler.toml [vars] PACKAGE_VERSION` together. `site/data/version.yaml` is generated at build time by `scripts/write-version.js` — do not commit it (it is gitignored). Current version: **1.3.2**
 
 ---
 
@@ -311,7 +311,10 @@ During local `wrangler pages dev`, logs print to the terminal.
 
 ## Current state (last updated: 2026-05-23)
 
-### v1.3.1 — CURRENT
+### v1.3.2 — CURRENT
+- Fix: photo picker ESC key now closes the overlay (was missing from the Escape handler); picker now uses `openSheet()` so body scroll is locked while picker is open
+
+### v1.3.1
 - Fix: photo picker "Insert photo →" button is now an explicit green verb button; clicking a thumbnail selects it (green border highlight) but does not insert — the button must be clicked to confirm
 
 ### v1.3.0
