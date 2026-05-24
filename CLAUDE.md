@@ -150,7 +150,7 @@ Publishing photos happens through the **admin UI** (at `photos.ctsmith.org/admin
 
 ## Versioning
 
-Source of truth is `package.json`. When bumping the version, update `package.json` **and** `wrangler.toml [vars] PACKAGE_VERSION` together. `site/data/version.yaml` is generated at build time by `scripts/write-version.js` — do not commit it (it is gitignored). Current version: **1.4.0**
+Source of truth is `package.json`. When bumping the version, update `package.json` **and** `wrangler.toml [vars] PACKAGE_VERSION` together. `site/data/version.yaml` is generated at build time by `scripts/write-version.js` — do not commit it (it is gitignored). Current version: **1.4.1**
 
 ---
 
@@ -314,7 +314,10 @@ During local `wrangler pages dev`, logs print to the terminal.
 
 ## Current state (last updated: 2026-05-23)
 
-### v1.4.0 — CURRENT
+### v1.4.1 — CURRENT
+- Fix: `getFile()` in `github.js` now decodes GitHub's base64 content through `TextDecoder`, preventing UTF-8 multi-byte characters (curly quotes, em dashes, etc.) from being corrupted to Latin-1 garbage on re-edit after rebuild
+
+### v1.4.0
 - Feature: series manifests now support `seriesPosts: [{slug, label}]` — posts attached to a series are shown as a "Related writing" section below the photo grid on the series page (draft posts and missing slugs are silently skipped)
 - Admin: "Related writing" section in series detail panel — attach/detach published posts; attach dropdown excludes already-attached posts; `GET /api/projects` now returns `seriesPosts` per series; `PATCH /api/projects/:slug` now accepts `seriesPosts`
 
