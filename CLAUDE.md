@@ -150,7 +150,7 @@ Publishing photos happens through the **admin UI** (at `photos.ctsmith.org/admin
 
 ## Versioning
 
-Source of truth is `package.json`. When bumping the version, update `package.json` **and** `wrangler.toml [vars] PACKAGE_VERSION` together. `site/data/version.yaml` is generated at build time by `scripts/write-version.js` — do not commit it (it is gitignored). Current version: **1.3.2**
+Source of truth is `package.json`. When bumping the version, update `package.json` **and** `wrangler.toml [vars] PACKAGE_VERSION` together. `site/data/version.yaml` is generated at build time by `scripts/write-version.js` — do not commit it (it is gitignored). Current version: **1.3.3**
 
 ---
 
@@ -311,7 +311,10 @@ During local `wrangler pages dev`, logs print to the terminal.
 
 ## Current state (last updated: 2026-05-23)
 
-### v1.3.2 — CURRENT
+### v1.3.3 — CURRENT
+- Fix: "Featured" badge on post cards now reads from `settings.featured[]` (the source of truth) instead of post front matter — deselecting a post in Settings now immediately clears the badge
+
+### v1.3.2
 - Fix: photo picker ESC key now closes the overlay (was missing from the Escape handler); picker now uses `openSheet()` so body scroll is locked while picker is open
 
 ### v1.3.1
