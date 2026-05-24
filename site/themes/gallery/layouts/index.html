@@ -30,7 +30,7 @@
         srcset="{{ $base }}/{{ $heroKey }}/600.jpg 600w, {{ $base }}/{{ $heroKey }}/1200.jpg 1200w, {{ $base }}/{{ $heroKey }}/2400.jpg 2400w"
         sizes="100vw"
         class="w-full h-full object-cover"
-        alt="{{ with $heroPhoto.caption }}{{ . }}{{ end }}"
+        alt="{{ with $heroPhoto.caption }}{{ . }}{{ else }}Hero photo{{ end }}"
         loading="eager"
       >
       {{- with $heroPhoto.caption -}}
