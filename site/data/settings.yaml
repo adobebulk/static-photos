@@ -4,8 +4,4 @@ photographer: C.T.Smith
 description: CT Smith Photos
 heroPhotoKey: instagram/003
 heroLink: /projects/instagram/
-featured:
-  - type: photo
-    slug: portfolio
-    photoId: '035'
-    label: ''
+featured: []
