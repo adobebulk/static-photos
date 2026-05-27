@@ -19,7 +19,16 @@ photos:
     height: 1671
     caption: ''
     downloadable: false
+  - id: '003'
+    key: miasma/003
+    width: 4032
+    height: 3024
+    caption: Man standing on roof
+    downloadable: false
 ---
+
+
+
 
 
 
