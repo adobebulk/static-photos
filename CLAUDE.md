@@ -150,7 +150,7 @@ Publishing photos happens through the **admin UI** (at `photos.ctsmith.org/admin
 
 ## Versioning
 
-Source of truth is `package.json`. When bumping the version, update `package.json` **and** `wrangler.toml [vars] PACKAGE_VERSION` together. `site/data/version.yaml` is generated at build time by `scripts/write-version.js` — do not commit it (it is gitignored). Current version: **1.5.2**
+Source of truth is `package.json`. When bumping the version, update `package.json` **and** `wrangler.toml [vars] PACKAGE_VERSION` together. `site/data/version.yaml` is generated at build time by `scripts/write-version.js` — do not commit it (it is gitignored). Current version: **1.5.3**
 
 ---
 
@@ -336,13 +336,16 @@ During local `wrangler pages dev`, logs print to the terminal.
 
 ## Current state (last updated: 2026-05-30)
 
-### v1.5.2 — CURRENT
-- Fix: destructive photo, series, and pool deletes purge affected `/assets/*` URLs so immutable CDN cache entries do not outlive deleted R2 objects.
-- Fix: deleting photos/series/posts removes stale homepage hero and featured references; homepage featured photo lookup also tolerates missing photos without failing the Hugo build.
-- Fix: pool moves now preflight required source objects and copy before deleting pool objects, preventing incomplete target photos from being published when pool variants are missing.
-- Fix: new uploads and pool moves inherit `downloadsDefault` instead of forcing `downloadable: false`; originals remain public only when the inherited default makes them downloadable.
-- Fix: staging and pool raw listings paginate R2 `list()` results instead of reading only the first page.
+### v1.5.3 — CURRENT
+- Fix: CDN cache purge now covers all variant and original asset URLs on photo/series/pool delete, not just the original.
+- Fix: deleting a photo, series, or post now removes stale hero and featured[] references from settings.
+- Fix: uploads and pool moves inherit `downloadsDefault` from the series instead of forcing `downloadable: false`.
+- Fix: pool photo count (`remaining`) now uses actual `processedCount` instead of `toProcess.length`.
+- Fix: pool-to-series move preflights all source objects before copying; copies all before deleting pool objects.
+- Fix: R2 `list()` calls in staging and pool are now fully paginated (was truncating at 1000 objects).
 - Fix: per-photo PhotoSwipe permalink pages bind the single-image gallery correctly; admin post delete handlers tolerate apostrophes in titles.
+- Fix: homepage featured photo lookup uses `range`/`if` instead of `where` for reliable nested-key matching.
+- Fix: Cloudflare cache purge batches up to 30 URLs per API call.
 
 ### v1.5.1
 - Fix: Rebuild no longer fails with `422 GitRPC::BadObjectState` when staged deletions reference paths that never reached GitHub. `flushStaging()` now checks each pending deletion against the GitHub Contents API and silently skips phantom deletes (pool stubs born and removed entirely within staging). All staging is cleared regardless, so no phantom deletes linger.
