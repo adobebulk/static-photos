@@ -179,7 +179,7 @@ Publishing photos happens through the **admin UI** (at `photos.ctsmith.org/admin
 
 ## Versioning
 
-Source of truth is `package.json`. When bumping the version, update `package.json` **and** `wrangler.toml [vars] PACKAGE_VERSION` together. `site/data/version.yaml` is generated at build time by `scripts/write-version.js` — do not commit it (it is gitignored). Current version: **1.5.3**
+Source of truth is `package.json`. When bumping the version, update `package.json` **and** `wrangler.toml [vars] PACKAGE_VERSION` together. `site/data/version.yaml` is generated at build time by `scripts/write-version.js` — do not commit it (it is gitignored). Current version: **1.5.5**
 
 ---
 
@@ -365,7 +365,13 @@ During local `wrangler pages dev`, logs print to the terminal.
 
 ## Current state (last updated: 2026-05-30)
 
-### v1.5.3 — CURRENT
+### v1.5.5 — CURRENT
+- Fix: random new-series slug allocation now checks staging and GitHub before accepting a slug, avoiding silent manifest overwrite if a rare collision occurs.
+
+### v1.5.4
+- Fix: new series slugs are now random 6-character strings (e.g. k4m9zr), permanent and independent of the title. Existing series are unaffected.
+
+### v1.5.3
 - Fix: CDN cache purge now covers all variant and original asset URLs on photo/series/pool delete, not just the original.
 - Fix: deleting a photo, series, or post now removes stale hero and featured[] references from settings.
 - Fix: uploads and pool moves inherit `downloadsDefault` from the series instead of forcing `downloadable: false`.

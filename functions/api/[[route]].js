@@ -222,6 +222,26 @@ const settingsPath = "site/data/settings.yaml";
 const POOL_SLUG = "_pool";
 const rawPoolKey = (pid) => `_pool/raw/${pid}/original.jpg`;
 
+/**
+ * Generates a random 6-character alphanumeric slug for a new series.
+ * Opaque and permanent — never derived from or changed with the title.
+ */
+function randomSeriesSlug() {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  return Array.from(crypto.getRandomValues(new Uint8Array(6)))
+    .map(b => chars[b % chars.length]).join('');
+}
+
+async function newSeriesSlug(env) {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const slug = randomSeriesSlug();
+    const existing = await readStaged(env.stagingBucket, indexPath(slug), null)
+      ?? await getFile(env.githubToken, env.githubRepo, indexPath(slug));
+    if (!existing) return slug;
+  }
+  throw new Error("unable to allocate unique series slug");
+}
+
 const DEFAULT_SETTINGS = {
   title: "Photos",
   navLabel: "Work",
@@ -329,12 +349,7 @@ export async function onRequest(ctx) {
       const { title, description } = await request.json();
       if (!title) return err("title required");
 
-      const slug = slugify(title);
-      // Check staging and GitHub for existing series
-      const stagedExisting = await readStaged(env.stagingBucket, indexPath(slug), null);
-      if (stagedExisting) return err("series already exists", 409);
-      const ghExisting = await getFile(env.githubToken, env.githubRepo, indexPath(slug));
-      if (ghExisting) return err("series already exists", 409);
+      const slug = await newSeriesSlug(env);
 
       const content = newSeriesDoc({ title, description, slug });
       await stageFile(env.stagingBucket, indexPath(slug), content);
