@@ -1,6 +1,6 @@
-# CLAUDE.md — static-photos
+# AGENTS.md — static-photos
 
-Context file for both Cowork and Claude Code. Keep this up to date as the project evolves.
+Context file for both Cowork and Codex. Keep this up to date as the project evolves.
 
 > **Architecture redesigned 2026-05-21, single-host decision 2026-05-22.** The project moved from a Mac-Mini-as-hub model to a **decoupled (Jamstack) architecture**: build the site from code, store the heavy assets in object storage, run the admin as serverless code. Everything is served from **one hostname** (`photos.ctsmith.org`) via a single Cloudflare Pages project. Migration is complete — this file is the authoritative working summary.
 
@@ -55,11 +55,11 @@ The Mac Mini is **out of the serving/admin path entirely** — Caddy, `cloudflar
 Every commit that changes behaviour (feature, fix, refactor) **must** include all of the following in the same commit. No exceptions.
 
 1. **Version bump** — increment `package.json` version and `wrangler.toml [vars] PACKAGE_VERSION` together (minor bump for features, patch for fixes).
-2. **CLAUDE.md** — update Hugo template notes, data models, API table, known issues, current state, and version number in the Versioning section. If a TODO is done, remove it.
+2. **AGENTS.md** — update Hugo template notes, data models, API table, known issues, current state, and version number in the Versioning section. If a TODO is done, remove it.
 3. **README.md** — update the version line and any section that describes changed behaviour.
 4. **Delete unused files** — remove any file that is no longer referenced.
 
-This is not optional clean-up. A commit that skips any of these is incomplete. Claude Code sessions must treat docs and versioning as part of the same unit of work as the code change.
+This is not optional clean-up. A commit that skips any of these is incomplete. Codex sessions must treat docs and versioning as part of the same unit of work as the code change.
 
 ---
 
@@ -85,7 +85,7 @@ This is not optional clean-up. A commit that skips any of these is incomplete. C
 
 ```
 static-photos/
-├── CLAUDE.md                   ← you are here (working summary)
+├── AGENTS.md                   ← you are here (working summary)
 ├── RUNBOOK.md                  ← Cloudflare/GitHub account setup guide
 ├── README.md                   ← orientation for developers
 ├── .dev.vars.example           ← copy to .dev.vars for local wrangler dev
@@ -311,17 +311,17 @@ During local `wrangler pages dev`, logs print to the terminal.
 
 ---
 
-## Cowork vs Claude Code — who does what
+## Cowork vs Codex — who does what
 
 | Task | Tool |
 |---|---|
 | New features, redesigns, architecture decisions | **Cowork** |
-| Live dev loop: template edits, CSS tweaks, Functions debugging | **Claude Code** in terminal |
+| Live dev loop: template edits, CSS tweaks, Functions debugging | **Codex** in terminal |
 | Upload photos, manage series | **Admin UI** (`photos.ctsmith.org/admin`) |
-| Git commits, running scripts, installing packages, `wrangler` deploys | **Claude Code** |
-| Updating this CLAUDE.md | Whoever makes the change |
+| Git commits, running scripts, installing packages, `wrangler` deploys | **Codex** |
+| Updating this AGENTS.md | Whoever makes the change |
 
-**Important:** Don't run Cowork and Claude Code git operations simultaneously — `.git/index.lock` conflict.
+**Important:** Don't run Cowork and Codex git operations simultaneously — `.git/index.lock` conflict.
 
 ---
 

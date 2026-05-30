@@ -19,7 +19,7 @@
 
 import yaml from "js-yaml";
 import { getEnv } from "../_lib/env.js";
-import { getFile, listDir, commitFiles } from "../_lib/github.js";
+import { getFile, listDir } from "../_lib/github.js";
 import {
   stageFile, stageDelete, readStaged,
   getStagedSlugs, isStagedDeleted, flushStaging,
@@ -90,6 +90,7 @@ function getImageDimensions(buffer) {
 // ─── Image processing ────────────────────────────────────────────────────────
 
 const SIZES = [600, 1200, 2400];
+const MAX_DIRECT_UPLOAD_FILES = 8;
 const FORMATS = [
   { format: "avif", ext: "avif", contentType: "image/avif" },
   { format: "jpeg", ext: "jpg",  contentType: "image/jpeg" },
@@ -163,22 +164,52 @@ async function generateVariants(slug, id, env) {
  * Falls back to caches.default.delete() for local-datacenter purge only.
  */
 async function purgeCache(env, url) {
+  await purgeCacheFiles(env, [url]);
+}
+
+async function purgeCacheFiles(env, urls) {
+  if (!urls.length) return;
   if (env.cfZoneId && env.cfApiToken) {
-    await fetch(
-      `https://api.cloudflare.com/client/v4/zones/${env.cfZoneId}/purge_cache`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${env.cfApiToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ files: [url] }),
-      }
-    );
+    const batchSize = 30;
+    for (let i = 0; i < urls.length; i += batchSize) {
+      await fetch(
+        `https://api.cloudflare.com/client/v4/zones/${env.cfZoneId}/purge_cache`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${env.cfApiToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ files: urls.slice(i, i + batchSize) }),
+        }
+      );
+    }
   } else {
     // Best-effort: only purges in this PoP
-    await caches.default.delete(new Request(url));
+    await Promise.all(urls.map((url) => caches.default.delete(new Request(url))));
   }
+}
+
+const assetUrl = (key) => `https://photos.ctsmith.org/assets/${key}`;
+
+const photoAssetKeys = (slug, id) => [
+  ...SIZES.flatMap((s) => FORMATS.map(({ ext }) => `${slug}/${id}/${s}.${ext}`)),
+  `${slug}/${id}/original.jpg`,
+];
+
+async function purgeAssetKeys(env, keys) {
+  await purgeCacheFiles(env, keys.map((key) => assetUrl(key)));
+}
+
+async function listAllObjects(bucket, options) {
+  const objects = [];
+  let cursor;
+  do {
+    const page = await bucket.list({ ...options, cursor });
+    objects.push(...page.objects);
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+  return objects;
 }
 
 // ─── GitHub path helpers ─────────────────────────────────────────────────────
@@ -209,6 +240,45 @@ async function readManifest(env, slug) {
   );
   if (!result) return null;
   return { ...parseFrontMatter(result.content), raw: result.content };
+}
+
+async function readSettings(env) {
+  const result = await readStaged(
+    env.stagingBucket,
+    settingsPath,
+    async (p) => getFile(env.githubToken, env.githubRepo, p)
+  );
+  const settings = result ? (yaml.load(result.content) ?? {}) : {};
+  return { ...DEFAULT_SETTINGS, ...settings };
+}
+
+async function stageSettings(env, settings) {
+  await stageFile(env.stagingBucket, settingsPath, yaml.dump(settings, { lineWidth: -1 }));
+}
+
+async function removeDeletedReferences(env, { seriesSlug, photoId, postSlug }) {
+  const settings = await readSettings(env);
+  const before = JSON.stringify(settings);
+
+  if (seriesSlug && photoId && settings.heroPhotoKey === `${seriesSlug}/${photoId}`) {
+    settings.heroPhotoKey = "";
+    settings.heroLink = "";
+  } else if (seriesSlug && !photoId && settings.heroPhotoKey?.startsWith(`${seriesSlug}/`)) {
+    settings.heroPhotoKey = "";
+    settings.heroLink = "";
+  }
+
+  settings.featured = (Array.isArray(settings.featured) ? settings.featured : []).filter((item) => {
+    if (seriesSlug && !photoId && item.type === "series" && item.slug === seriesSlug) return false;
+    if (seriesSlug && !photoId && item.type === "photo" && item.slug === seriesSlug) return false;
+    if (seriesSlug && photoId && item.type === "photo" && item.slug === seriesSlug && item.photoId === photoId) return false;
+    if (postSlug && item.type === "post" && item.slug === postSlug) return false;
+    return true;
+  });
+
+  if (JSON.stringify(settings) !== before) {
+    await stageSettings(env, settings);
+  }
 }
 
 // ─── Router ──────────────────────────────────────────────────────────────────
@@ -302,10 +372,14 @@ export async function onRequest(ctx) {
       const formData = await request.formData();
       const files = formData.getAll("photos");
       if (!files.length) return err("no photos in request");
+      if (files.length > MAX_DIRECT_UPLOAD_FILES) {
+        return err(`upload at most ${MAX_DIRECT_UPLOAD_FILES} photos per request`, 413);
+      }
 
       const addedPhotos = [];
       const gitFiles = [];
       let photos = [...(manifest.data.photos ?? [])];
+      const downloadsDefault = manifest.data.downloadsDefault === true;
 
       for (const file of files) {
         const originalBuffer = await file.arrayBuffer();
@@ -331,15 +405,16 @@ export async function onRequest(ctx) {
           });
         }
 
-        // 4. If not downloadable: move original to private bucket, remove from public.
-        //    If downloadable: original stays in ASSETS_BUCKET (already public).
+        // 4. Always store the original privately. Keep the public copy only
+        //    when the series-level default makes originals downloadable.
         await env.originalsBucket.put(originalKey, originalBuffer, {
           httpMetadata: { contentType: "image/jpeg" },
         });
-        // Default is not downloadable — delete the temporarily-public original.
-        await env.assetsBucket.delete(originalKey);
+        if (!downloadsDefault) {
+          await env.assetsBucket.delete(originalKey);
+        }
 
-        const photo = { id, key, width: dims.width, height: dims.height, caption: "", downloadable: false };
+        const photo = { id, key, width: dims.width, height: dims.height, caption: "" };
         photos.push(photo);
         addedPhotos.push(photo);
 
@@ -399,8 +474,7 @@ export async function onRequest(ctx) {
         } else {
           // Delete from public bucket and purge CDN cache
           await env.assetsBucket.delete(originalKey);
-          const publicUrl = `https://photos.ctsmith.org/assets/${originalKey}`;
-          await purgeCache(env, publicUrl);
+          await purgeCache(env, assetUrl(originalKey));
         }
         updated.downloadable = body.downloadable;
       }
@@ -445,6 +519,7 @@ export async function onRequest(ctx) {
 
       await env.assetsBucket.delete([...variantKeys, originalKey]);
       await env.originalsBucket.delete(originalKey);
+      await purgeAssetKeys(env, [...variantKeys, originalKey]);
 
       // Remove from manifest
       const updatedData = {
@@ -459,6 +534,7 @@ export async function onRequest(ctx) {
 
       await stageFile(env.stagingBucket, indexPath(slug), updatedManifest);
       await stageDelete(env.stagingBucket, stubPath(slug, id));
+      await removeDeletedReferences(env, { seriesSlug: slug, photoId: id });
 
       return json({ deleted: id });
     }
@@ -488,12 +564,14 @@ export async function onRequest(ctx) {
         ];
       });
       await Promise.all(allR2Deletes);
+      await purgeAssetKeys(env, photos.flatMap((photo) => photoAssetKeys(slug, photo.id)));
 
       // Stage deletion of all per-photo stubs and the manifest.
       await Promise.all(photos.map((photo) =>
         stageDelete(env.stagingBucket, stubPath(slug, photo.id))
       ));
       await stageDelete(env.stagingBucket, indexPath(slug));
+      await removeDeletedReferences(env, { seriesSlug: slug });
 
       return json({ deleted: slug });
     }
@@ -585,30 +663,18 @@ export async function onRequest(ctx) {
 
     // ── GET /api/settings ────────────────────────────────────────────────────
     if (method === "GET" && segments.length === 1 && segments[0] === "settings") {
-      const result = await readStaged(
-        env.stagingBucket,
-        settingsPath,
-        async (p) => getFile(env.githubToken, env.githubRepo, p)
-      );
-      const settings = result ? (yaml.load(result.content) ?? {}) : {};
-      return json({ ...DEFAULT_SETTINGS, ...settings });
+      return json(await readSettings(env));
     }
 
     // ── PATCH /api/settings ──────────────────────────────────────────────────
     if (method === "PATCH" && segments.length === 1 && segments[0] === "settings") {
       const body = await request.json();
-      const result = await readStaged(
-        env.stagingBucket,
-        settingsPath,
-        async (p) => getFile(env.githubToken, env.githubRepo, p)
-      );
-      const current = result ? (yaml.load(result.content) ?? {}) : {};
       const allowedKeys = ["title", "navLabel", "photographer", "description", "heroPhotoKey", "heroLink", "featured"];
-      const updated = { ...DEFAULT_SETTINGS, ...current };
+      const updated = await readSettings(env);
       for (const k of allowedKeys) {
         if (body[k] !== undefined) updated[k] = body[k];
       }
-      await stageFile(env.stagingBucket, settingsPath, yaml.dump(updated, { lineWidth: -1 }));
+      await stageSettings(env, updated);
       return json(updated);
     }
 
@@ -721,6 +787,7 @@ export async function onRequest(ctx) {
       );
       if (!result) return err("post not found", 404);
       await stageDelete(env.stagingBucket, postPath(slug));
+      await removeDeletedReferences(env, { postSlug: slug });
       return json({ deleted: slug });
     }
 
@@ -776,8 +843,8 @@ export async function onRequest(ctx) {
 
     // ── GET /api/pool ─────────────────────────────────────────────────────────
     if (method === "GET" && segments.length === 1 && segments[0] === "pool") {
-      const rawList = await env.originalsBucket.list({ prefix: "_pool/raw/", include: ["customMetadata"] });
-      const raw = rawList.objects
+      const rawObjects = await listAllObjects(env.originalsBucket, { prefix: "_pool/raw/", include: ["customMetadata"] });
+      const raw = rawObjects
         .filter(obj => obj.key.endsWith("/original.jpg"))
         .map(obj => {
           const pid = obj.key.slice("_pool/raw/".length, -"/original.jpg".length);
@@ -834,8 +901,8 @@ export async function onRequest(ctx) {
         poolManifest = { data: initData, body: "" };
       }
 
-      const rawList = await env.originalsBucket.list({ prefix: "_pool/raw/", include: ["customMetadata"] });
-      const rawObjects = rawList.objects.filter(obj => obj.key.endsWith("/original.jpg"));
+      const rawListObjects = await listAllObjects(env.originalsBucket, { prefix: "_pool/raw/", include: ["customMetadata"] });
+      const rawObjects = rawListObjects.filter(obj => obj.key.endsWith("/original.jpg"));
       const toProcess = rawObjects.slice(0, limit);
 
       let photos = [...(poolManifest.data.photos ?? [])];
@@ -874,7 +941,7 @@ export async function onRequest(ctx) {
         });
         await env.assetsBucket.delete(originalKey);
 
-        const photoEntry = { id, key, width, height, caption: "", downloadable: false };
+        const photoEntry = { id, key, width, height, caption: "" };
         photos.push(photoEntry);
         await stageFile(env.stagingBucket, stubPath(POOL_SLUG, id), newPhotoStub(id));
 
@@ -886,7 +953,7 @@ export async function onRequest(ctx) {
       const updatedPoolData = { ...poolManifest.data, photos, draft: true };
       await stageFile(env.stagingBucket, indexPath(POOL_SLUG), serializeFrontMatter(updatedPoolData, poolManifest.body ?? ""));
 
-      const remaining = rawObjects.length - toProcess.length;
+      const remaining = Math.max(0, rawObjects.length - processedCount);
       return json({ processed: processedCount, remaining });
     }
 
@@ -910,6 +977,7 @@ export async function onRequest(ctx) {
       const originalKey = `${POOL_SLUG}/${id}/original.jpg`;
       await env.assetsBucket.delete([...variantKeys, originalKey]);
       await env.originalsBucket.delete(originalKey);
+      await purgeAssetKeys(env, [...variantKeys, originalKey]);
 
       const updatedData = { ...poolManifest.data, photos: photos.filter(p => p.id !== id), draft: true };
       await stageFile(env.stagingBucket, indexPath(POOL_SLUG), serializeFrontMatter(updatedData, poolManifest.body ?? ""));
@@ -942,6 +1010,7 @@ export async function onRequest(ctx) {
 
       let targetPhotos = [...(targetManifest.data.photos ?? [])];
       let poolPhotos = [...(poolManifest.data.photos ?? [])];
+      const downloadsDefault = targetManifest.data.downloadsDefault === true;
       const moved = [];
       const skipped = [];
 
@@ -951,31 +1020,39 @@ export async function onRequest(ctx) {
 
         const newId = nextPhotoId(targetPhotos);
         const newKey = `${slug}/${newId}`;
+        const variantCopies = [];
 
-        // Copy 6 variants: ASSETS_BUCKET _pool/<id>/<size>.<ext> → <slug>/<newId>/<size>.<ext>
-        // R2 has no server-side rename; get+put+delete is the required pattern.
+        // Preflight all source objects before writing or deleting anything.
         for (const size of SIZES) {
           for (const { ext, contentType } of FORMATS) {
             const srcKey = `${POOL_SLUG}/${id}/${size}.${ext}`;
             const dstKey = `${newKey}/${size}.${ext}`;
             const obj = await env.assetsBucket.get(srcKey);
-            if (obj) {
-              await env.assetsBucket.put(dstKey, obj.body, { httpMetadata: { contentType } });
-              await env.assetsBucket.delete(srcKey);
-            }
+            if (!obj) throw new Error(`Pool photo ${id} is missing ${size}.${ext}`);
+            variantCopies.push({ srcKey, dstKey, obj, contentType });
           }
         }
 
-        // Copy original: ORIGINALS_BUCKET _pool/<id>/original.jpg → <slug>/<newId>/original.jpg
         const srcOrigKey = `${POOL_SLUG}/${id}/original.jpg`;
         const dstOrigKey = `${newKey}/original.jpg`;
         const origObj = await env.originalsBucket.get(srcOrigKey);
-        if (origObj) {
-          await env.originalsBucket.put(dstOrigKey, origObj.body, { httpMetadata: { contentType: "image/jpeg" } });
-          await env.originalsBucket.delete(srcOrigKey);
+        if (!origObj) throw new Error(`Pool photo ${id} is missing original.jpg`);
+        const origBuffer = await origObj.arrayBuffer();
+
+        // Copy all destination objects before deleting pool sources.
+        for (const { dstKey, obj, contentType } of variantCopies) {
+          await env.assetsBucket.put(dstKey, obj.body, { httpMetadata: { contentType } });
+        }
+        await env.originalsBucket.put(dstOrigKey, origBuffer, { httpMetadata: { contentType: "image/jpeg" } });
+        if (downloadsDefault) {
+          await env.assetsBucket.put(dstOrigKey, origBuffer.slice(0), { httpMetadata: { contentType: "image/jpeg" } });
         }
 
-        const newPhoto = { id: newId, key: newKey, width: poolPhoto.width, height: poolPhoto.height, caption: poolPhoto.caption || "", downloadable: false };
+        await Promise.all(variantCopies.map(({ srcKey }) => env.assetsBucket.delete(srcKey)));
+        await env.originalsBucket.delete(srcOrigKey);
+        await purgeAssetKeys(env, [...variantCopies.map(({ srcKey }) => srcKey), srcOrigKey]);
+
+        const newPhoto = { id: newId, key: newKey, width: poolPhoto.width, height: poolPhoto.height, caption: poolPhoto.caption || "" };
         targetPhotos.push(newPhoto);
         await stageFile(env.stagingBucket, stubPath(slug, newId), newPhotoStub(newId));
         moved.push(newPhoto);

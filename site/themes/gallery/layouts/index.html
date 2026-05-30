@@ -97,7 +97,10 @@
             {{- with $seriesPage -}}
               {{- if not .Params.draft -}}
                 {{- $photoId := $item.photoId -}}
-                {{- $targetPhoto := index (where .Params.photos "id" $photoId) 0 -}}
+                {{- $targetPhoto := false -}}
+                {{- range .Params.photos -}}
+                  {{- if eq .id $photoId -}}{{- $targetPhoto = . -}}{{- end -}}
+                {{- end -}}
                 {{- with $targetPhoto -}}
                   {{- $photoPermalink := printf "/projects/%s/%s/" $item.slug .id -}}
                   <a href="{{ $photoPermalink }}" class="relative block overflow-hidden rounded-sm bg-stone-200 aspect-[4/3] group">
