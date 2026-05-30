@@ -63,6 +63,35 @@ This is not optional clean-up. A commit that skips any of these is incomplete. C
 
 ---
 
+## Development pipeline — ENFORCED
+
+Every code change — feature, fix, refactor — follows this pipeline without exception.
+
+### 1. Branch
+Create a branch before touching any code.
+- Naming: `feat/<short-description>`, `fix/<short-description>`, `chore/<short-description>`
+- Example: `git checkout -b fix/random-series-slugs`
+- Never commit directly to `main`.
+
+### 2. Work
+Make commits on the branch. Commit messages: `type: short description`.
+Apply all documentation hygiene rules (version bump, CLAUDE.md, README.md, delete unused files) in the same commit as the code change.
+
+### 3. Self-review
+Before declaring work done, re-read the diff (`git diff main..HEAD`). Check:
+- No debug logging left in
+- No dead code or unused imports
+- Non-obvious logic has an inline comment explaining *why*, not just *what*
+- All changed behaviour is reflected in CLAUDE.md and README.md
+
+### 4. Leave the branch open
+Do not merge to `main`. Push the branch and stop. The human reviews and merges (or asks Codex to review first).
+
+### 5. Merge only after review
+Merge to `main` only when explicitly instructed after review. Squash if the branch has noisy intermediate commits.
+
+---
+
 ## Tech stack
 
 | Layer | Tech | Notes |
