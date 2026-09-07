@@ -9,8 +9,8 @@
  *   2. For each of 6 variants (600/1200/2400 × avif/jpg): fetch the original URL with
  *      cf.image options (Transform via Workers) → PUT response body to ASSETS_BUCKET
  *   3. If not downloadable: move original to ORIGINALS_BUCKET, delete from ASSETS_BUCKET
- *   4. Append photo entry to _index.md manifest + create <id>.md stub
- *   5. Commit both files to GitHub (single commit via Trees API)
+ *   4. Stage the updated manifest + <id>.md stub immediately (crash-safe; not left until
+ *      the end of a multi-photo request). GitHub is only written on Rebuild.
  *
  * Image transforms use "Transform via Workers" (fetch with cf.image), not the Images
  * binding — the binding is not supported for Pages Functions.
@@ -23,7 +23,7 @@ import { getFile, listDir } from "../_lib/github.js";
 import {
   stageFile, stageDelete, readStaged,
   getStagedSlugs, isStagedDeleted, flushStaging,
-  getStagedPostSlugs, isStagedPostDeleted,
+  getStagedPostSlugs, isStagedPostDeleted, pendingCounts,
 } from "../_lib/staging.js";
 import {
   parseFrontMatter,
@@ -172,20 +172,30 @@ async function purgeCacheFiles(env, urls) {
   if (env.cfZoneId && env.cfApiToken) {
     const batchSize = 30;
     for (let i = 0; i < urls.length; i += batchSize) {
-      await fetch(
-        `https://api.cloudflare.com/client/v4/zones/${env.cfZoneId}/purge_cache`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${env.cfApiToken}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ files: urls.slice(i, i + batchSize) }),
-        }
-      );
+      const body = JSON.stringify({ files: urls.slice(i, i + batchSize) });
+      let lastErr = null;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const res = await fetch(
+          `https://api.cloudflare.com/client/v4/zones/${env.cfZoneId}/purge_cache`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${env.cfApiToken}`,
+              "Content-Type": "application/json",
+            },
+            body,
+          }
+        );
+        if (res.ok) { lastErr = null; break; }
+        lastErr = `HTTP ${res.status} ${await res.text()}`;
+        console.error(`[purgeCache] attempt ${attempt + 1} failed: ${lastErr}`);
+      }
+      if (lastErr) console.error(`[purgeCache] giving up on batch ${i}: ${lastErr}`);
     }
   } else {
-    // Best-effort: only purges in this PoP
+    // Best-effort: only purges in this PoP. Deleted objects can linger on other
+    // edges until TTL if CF_ZONE_ID / CF_API_TOKEN are not configured.
+    console.warn("[purgeCache] CF_ZONE_ID/CF_API_TOKEN unset; purging this PoP only");
     await Promise.all(urls.map((url) => caches.default.delete(new Request(url))));
   }
 }
@@ -199,6 +209,48 @@ const photoAssetKeys = (slug, id) => [
 
 async function purgeAssetKeys(env, keys) {
   await purgeCacheFiles(env, keys.map((key) => assetUrl(key)));
+}
+
+async function cleanupPhotoAssets(env, slug, id) {
+  const keys = photoAssetKeys(slug, id);
+  await Promise.all([
+    env.assetsBucket.delete(keys),
+    env.originalsBucket.delete(`${slug}/${id}/original.jpg`),
+  ]);
+}
+
+/**
+ * Bake one original into private original + 6 public variants.
+ * The original is temporarily public so Transform via Workers can fetch it.
+ * On failure, any objects written for this slug/id are removed so a retry is clean.
+ */
+async function bakePhoto(env, slug, id, originalBuffer, { publicOriginal = false } = {}) {
+  const originalKey = `${slug}/${id}/original.jpg`;
+  await env.assetsBucket.put(originalKey, originalBuffer, {
+    httpMetadata: { contentType: "image/jpeg" },
+  });
+  try {
+    const variants = await generateVariants(slug, id, env);
+    for (const v of variants) {
+      await env.assetsBucket.put(v.key, v.buffer, {
+        httpMetadata: { contentType: v.contentType },
+      });
+    }
+    await env.originalsBucket.put(originalKey, originalBuffer, {
+      httpMetadata: { contentType: "image/jpeg" },
+    });
+    if (!publicOriginal) {
+      await env.assetsBucket.delete(originalKey);
+    }
+  } catch (e) {
+    console.error(`[bakePhoto] failed ${slug}/${id}:`, e);
+    try {
+      await cleanupPhotoAssets(env, slug, id);
+    } catch (cleanupErr) {
+      console.error(`[bakePhoto] cleanup failed ${slug}/${id}:`, cleanupErr);
+    }
+    throw e;
+  }
 }
 
 async function listAllObjects(bucket, options) {
@@ -392,61 +444,31 @@ export async function onRequest(ctx) {
       }
 
       const addedPhotos = [];
-      const gitFiles = [];
       let photos = [...(manifest.data.photos ?? [])];
       const downloadsDefault = manifest.data.downloadsDefault === true;
+      let cover = manifest.data.cover || "";
 
       for (const file of files) {
         const originalBuffer = await file.arrayBuffer();
         const dims = getImageDimensions(originalBuffer) ?? { width: 0, height: 0 };
         const id = nextPhotoId(photos);
         const key = `${slug}/${id}`;
-        const originalKey = `${key}/original.jpg`;
 
-        // 1. PUT original to ASSETS_BUCKET so the transform fetch URL resolves.
-        await env.assetsBucket.put(originalKey, originalBuffer, {
-          httpMetadata: { contentType: "image/jpeg" },
-        });
-        console.log(`[upload] original PUT to ASSETS_BUCKET OK: ${originalKey}`);
-
-        // 2. Generate 6 variants via Transform via Workers (fetch with cf.image).
-        //    width/height default to 0 — templates degrade gracefully without them.
-        const variants = await generateVariants(slug, id, env);
-
-        // 3. PUT variants to ASSETS_BUCKET.
-        for (const v of variants) {
-          await env.assetsBucket.put(v.key, v.buffer, {
-            httpMetadata: { contentType: v.contentType },
-          });
-        }
-
-        // 4. Always store the original privately. Keep the public copy only
-        //    when the series-level default makes originals downloadable.
-        await env.originalsBucket.put(originalKey, originalBuffer, {
-          httpMetadata: { contentType: "image/jpeg" },
-        });
-        if (!downloadsDefault) {
-          await env.assetsBucket.delete(originalKey);
-        }
+        await bakePhoto(env, slug, id, originalBuffer, { publicOriginal: downloadsDefault });
 
         const photo = { id, key, width: dims.width, height: dims.height, caption: "" };
         photos.push(photo);
         addedPhotos.push(photo);
+        if (!cover) cover = id;
 
-        // Per-photo stub file
-        gitFiles.push({ path: stubPath(slug, id), content: newPhotoStub(id) });
-      }
-
-      // Update manifest: set cover if first photo
-      const updatedData = { ...manifest.data, photos };
-      if (!updatedData.cover && photos.length > 0) {
-        updatedData.cover = photos[0].id;
-      }
-      const updatedManifest = serializeFrontMatter(updatedData, manifest.body ?? "");
-      gitFiles.push({ path: indexPath(slug), content: updatedManifest });
-
-      for (const { path, content } of gitFiles) {
-        await stageFile(env.stagingBucket, path, content);
+        // Stage immediately so a later photo failing this request cannot orphan
+        // already-baked R2 objects (they would be unlisted and unretryable).
+        const updatedManifest = serializeFrontMatter(
+          { ...manifest.data, photos, cover },
+          manifest.body ?? ""
+        );
+        await stageFile(env.stagingBucket, stubPath(slug, id), newPhotoStub(id));
+        await stageFile(env.stagingBucket, indexPath(slug), updatedManifest);
       }
 
       return json({ uploaded: addedPhotos }, 201);
@@ -698,6 +720,12 @@ export async function onRequest(ctx) {
       return json({ version: env.packageVersion ?? "unknown" });
     }
 
+    // ── GET /api/staging ─────────────────────────────────────────────────────
+    if (method === "GET" && segments.length === 1 && segments[0] === "staging") {
+      if (!env.stagingBucket) return err("ORIGINALS_BUCKET not configured", 503);
+      return json(await pendingCounts(env.stagingBucket));
+    }
+
     // ── GET /api/posts ────────────────────────────────────────────────────────
     if (method === "GET" && segments.length === 1 && segments[0] === "posts") {
       const entries = await listDir(env.githubToken, env.githubRepo, "site/content/posts");
@@ -935,38 +963,22 @@ export async function onRequest(ctx) {
 
         const id = nextPhotoId(photos);
         const key = `${POOL_SLUG}/${id}`;
-        const originalKey = `${key}/original.jpg`;
 
-        // Temporarily public so generateVariants can fetch from the R2 custom domain
-        await env.assetsBucket.put(originalKey, buf, {
-          httpMetadata: { contentType: "image/jpeg" },
-        });
-
-        const variants = await generateVariants(POOL_SLUG, id, env);
-
-        for (const v of variants) {
-          await env.assetsBucket.put(v.key, v.buffer, {
-            httpMetadata: { contentType: v.contentType },
-          });
-        }
-
-        // Move original to private bucket, remove temp-public copy
-        await env.originalsBucket.put(originalKey, buf, {
-          httpMetadata: { contentType: "image/jpeg" },
-        });
-        await env.assetsBucket.delete(originalKey);
+        await bakePhoto(env, POOL_SLUG, id, buf, { publicOriginal: false });
 
         const photoEntry = { id, key, width, height, caption: "" };
         photos.push(photoEntry);
-        await stageFile(env.stagingBucket, stubPath(POOL_SLUG, id), newPhotoStub(id));
 
-        // Delete raw object only after all above succeed (crash-safe)
+        // Persist the pool manifest before deleting raw. A crash between these
+        // two writes can duplicate the photo on retry; a crash the other way
+        // used to drop it permanently (raw gone, unlisted variants in R2).
+        const updatedPoolData = { ...poolManifest.data, photos, draft: true };
+        await stageFile(env.stagingBucket, stubPath(POOL_SLUG, id), newPhotoStub(id));
+        await stageFile(env.stagingBucket, indexPath(POOL_SLUG), serializeFrontMatter(updatedPoolData, poolManifest.body ?? ""));
+
         await env.originalsBucket.delete(rawPoolKey(pid));
         processedCount++;
       }
-
-      const updatedPoolData = { ...poolManifest.data, photos, draft: true };
-      await stageFile(env.stagingBucket, indexPath(POOL_SLUG), serializeFrontMatter(updatedPoolData, poolManifest.body ?? ""));
 
       const remaining = Math.max(0, rawObjects.length - processedCount);
       return json({ processed: processedCount, remaining });
@@ -1054,7 +1066,7 @@ export async function onRequest(ctx) {
         if (!origObj) throw new Error(`Pool photo ${id} is missing original.jpg`);
         const origBuffer = await origObj.arrayBuffer();
 
-        // Copy all destination objects before deleting pool sources.
+        // Copy all destination objects before touching manifests or sources.
         for (const { dstKey, obj, contentType } of variantCopies) {
           await env.assetsBucket.put(dstKey, obj.body, { httpMetadata: { contentType } });
         }
@@ -1063,28 +1075,27 @@ export async function onRequest(ctx) {
           await env.assetsBucket.put(dstOrigKey, origBuffer.slice(0), { httpMetadata: { contentType: "image/jpeg" } });
         }
 
+        const newPhoto = { id: newId, key: newKey, width: poolPhoto.width, height: poolPhoto.height, caption: poolPhoto.caption || "" };
+        targetPhotos.push(newPhoto);
+        poolPhotos = poolPhotos.filter(p => p.id !== id);
+        moved.push(newPhoto);
+
+        // Stage both manifests before deleting pool sources. A crash after
+        // delete-but-before-stage used to drop the photo from both places.
+        const updatedTargetData = { ...targetManifest.data, photos: targetPhotos };
+        if (!updatedTargetData.cover && targetPhotos.length > 0) {
+          updatedTargetData.cover = targetPhotos[0].id;
+        }
+        const updatedPoolData = { ...poolManifest.data, photos: poolPhotos, draft: true };
+        await stageFile(env.stagingBucket, stubPath(slug, newId), newPhotoStub(newId));
+        await stageFile(env.stagingBucket, indexPath(slug), serializeFrontMatter(updatedTargetData, targetManifest.body ?? ""));
+        await stageFile(env.stagingBucket, indexPath(POOL_SLUG), serializeFrontMatter(updatedPoolData, poolManifest.body ?? ""));
+        await stageDelete(env.stagingBucket, stubPath(POOL_SLUG, id));
+
         await Promise.all(variantCopies.map(({ srcKey }) => env.assetsBucket.delete(srcKey)));
         await env.originalsBucket.delete(srcOrigKey);
         await purgeAssetKeys(env, [...variantCopies.map(({ srcKey }) => srcKey), srcOrigKey]);
-
-        const newPhoto = { id: newId, key: newKey, width: poolPhoto.width, height: poolPhoto.height, caption: poolPhoto.caption || "" };
-        targetPhotos.push(newPhoto);
-        await stageFile(env.stagingBucket, stubPath(slug, newId), newPhotoStub(newId));
-        moved.push(newPhoto);
-
-        poolPhotos = poolPhotos.filter(p => p.id !== id);
-        await stageDelete(env.stagingBucket, stubPath(POOL_SLUG, id));
       }
-
-      // Set cover on target series if currently unset
-      const updatedTargetData = { ...targetManifest.data, photos: targetPhotos };
-      if (!updatedTargetData.cover && targetPhotos.length > 0) {
-        updatedTargetData.cover = targetPhotos[0].id;
-      }
-      await stageFile(env.stagingBucket, indexPath(slug), serializeFrontMatter(updatedTargetData, targetManifest.body ?? ""));
-
-      const updatedPoolData = { ...poolManifest.data, photos: poolPhotos, draft: true };
-      await stageFile(env.stagingBucket, indexPath(POOL_SLUG), serializeFrontMatter(updatedPoolData, poolManifest.body ?? ""));
 
       return json({ moved, skipped });
     }

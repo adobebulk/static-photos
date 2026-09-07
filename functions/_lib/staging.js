@@ -88,6 +88,15 @@ export async function isStagedDeleted(bucket, slug) {
   return !!o;
 }
 
+/** Counts of pending writes and deletes. Used by the admin rebuild indicator. */
+export async function pendingCounts(bucket) {
+  const [files, deletions] = await Promise.all([
+    listAll(bucket, { prefix: "_pending/files/" }),
+    listAll(bucket, { prefix: "_pending/deletes/" }),
+  ]);
+  return { files: files.length, deletions: deletions.length };
+}
+
 /**
  * Flush all staged changes to GitHub in one commit and clear staging.
  * Returns { noop: true } if nothing pending, else { files, deletions }.

@@ -2,7 +2,7 @@
 
 A self-hosted photo gallery for an amateur photographer. A fast static Hugo site for visitors, with a private serverless admin panel for managing photos from a phone or laptop — no always-on server.
 
-Everything runs on **Cloudflare + GitHub**. Photos live in R2 (never git). Metadata commits are text-only. Current version: **1.5.5**
+Everything runs on **Cloudflare + GitHub**. Photos live in R2 (never git). Metadata commits are text-only. Current version: **1.5.6**
 
 Content types: **photo series** (grid + lightbox + per-photo permalinks with optional long-form body text) and **text posts** (pure markdown, no photos required). The homepage supports an optional hero image (with caption overlay, linking to the photo's permalink), a curated featured row (series, posts, or individual photos), the full series grid, and a recent posts strip.
 
@@ -124,7 +124,7 @@ No image files ever enter `content/` or git. All photos live in R2.
 2. **Edit metadata** (captions, cover, series settings) — all changes are staged.
 3. **Rebuild** — the admin "Rebuild" button flushes all staged changes into one GitHub commit, then pings the Cloudflare Pages deploy hook. Pages rebuilds the site.
 
-Staged changes are visible in the admin immediately (the API reads staging before falling back to GitHub). Visitors see the updated site after the Pages build completes (~30 s). Destructive photo and series actions also purge affected `/assets/*` URLs so immutable CDN cache entries do not outlive deleted R2 objects.
+Staged changes are visible in the admin immediately (the API reads staging before falling back to GitHub). The admin rebuild bar reads pending file/delete counts from `GET /api/staging` on load, so a refresh still shows “Rebuild needed” when `_pending/` is non-empty. Visitors see the updated site after the Pages build completes (~30 s). Destructive photo and series actions also purge affected `/assets/*` URLs so immutable CDN cache entries do not outlive deleted R2 objects. Upload, pool process, and pool-to-series moves persist the relevant manifest after each photo before deleting source objects, so a Worker timeout cannot drop a photo from both places.
 
 ---
 

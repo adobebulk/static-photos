@@ -179,7 +179,7 @@ Publishing photos happens through the **admin UI** (at `photos.ctsmith.org/admin
 
 ## Versioning
 
-Source of truth is `package.json`. When bumping the version, update `package.json` **and** `wrangler.toml [vars] PACKAGE_VERSION` together. `site/data/version.yaml` is generated at build time by `scripts/write-version.js` — do not commit it (it is gitignored). Current version: **1.5.5**
+Source of truth is `package.json`. When bumping the version, update `package.json` **and** `wrangler.toml [vars] PACKAGE_VERSION` together. `site/data/version.yaml` is generated at build time by `scripts/write-version.js` — do not commit it (it is gitignored). Current version: **1.5.6**
 
 ---
 
@@ -223,7 +223,7 @@ iceland-2025/001/1200.avif  1200.jpg   # mid / mobile lightbox + OG preview (use
 iceland-2025/001/600.avif   600.jpg    # grid thumbnail
 ```
 
-**On upload** the admin: resizes to 600/1200/2400px AVIF + JPEG via Transform via Workers (source = R2 custom domain); strips all metadata (privacy-first — protects GPS, also drops camera EXIF); PUTs variants to ASSETS_BUCKET and original to ORIGINALS_BUCKET; leaves the public original in ASSETS_BUCKET only when the series default allows downloads; stages the updated manifest to `_pending/` in ORIGINALS_BUCKET. Changes reach GitHub only when the admin "Rebuild" button is pressed (`POST /api/rebuild` → `flushStaging` → one commit → deploy hook).
+**On upload** the admin: resizes to 600/1200/2400px AVIF + JPEG via Transform via Workers (source = R2 custom domain); strips all metadata (privacy-first — protects GPS, also drops camera EXIF); PUTs variants to ASSETS_BUCKET and original to ORIGINALS_BUCKET; leaves the public original in ASSETS_BUCKET only when the series default allows downloads; stages the updated manifest to `_pending/` in ORIGINALS_BUCKET **after each photo** (a later failure in the same request cannot orphan already-baked objects). Failed bakes delete any objects written for that `slug/id` so a retry is clean. Changes reach GitHub only when the admin "Rebuild" button is pressed (`POST /api/rebuild` → `flushStaging` → one commit → deploy hook).
 
 **Downloadable originals:** the original lives in ORIGINALS_BUCKET. Marking a photo `downloadable` copies it into ASSETS_BUCKET; un-marking deletes the public copy and purges the CDN cache. New photos inherit `downloadsDefault` unless explicitly overridden. No Worker sits in the download path — the original is a plain CDN object once public.
 
@@ -253,9 +253,9 @@ A permanent, never-published special series that acts as a staging area for bulk
 - **Raw** (instant on drop, no processing): `ORIGINALS_BUCKET: _pool/raw/<pid>/original.jpg` with `customMetadata { filename, width, height, uploadedAt, status: "raw" }`. `pid` is `crypto.randomUUID()`.
 - **Processed** (after `POST /api/pool/process`): variants live in `ASSETS_BUCKET: _pool/<id>/600.avif` etc., original in `ORIGINALS_BUCKET: _pool/<id>/original.jpg`. `id` is sequential (001, 002, …) via `nextPhotoId()`. Manifest entry in `site/content/projects/_pool/_index.md` staged to `_pending/` — becomes part of GitHub on next Rebuild.
 
-**Move** preflights all variants/original, copies them to the target series key prefix, then deletes pool objects and updates both manifests. No re-processing.
+**Move** preflights all variants/original, copies them to the target series key prefix, stages both manifests, then deletes pool objects. No re-processing. Manifests are staged per photo before source deletion so a mid-batch timeout cannot drop a photo from both series and pool.
 
-**Background processing:** `POST /api/pool/process` is the single endpoint for both the "Process pool" button and any external scheduler. It processes up to `limit` (default 6) raw photos per call and returns `{ processed, remaining }`. The admin loops until `remaining === 0`. For a cron-driven auto-processing Worker, see TODO in Known Issues below.
+**Background processing:** `POST /api/pool/process` is the single endpoint for both the "Process pool" button and any external scheduler. It processes up to `limit` (default 6) raw photos per call and returns `{ processed, remaining }`. The pool manifest is staged after each successful bake, *then* the raw object is deleted. The admin loops until `remaining === 0`. For a cron-driven auto-processing Worker, see TODO in Known Issues below.
 
 ### Site settings (`site/data/settings.yaml`)
 
@@ -293,6 +293,7 @@ featured: []          # ordered list of { type: "series"|"post"|"photo", slug, l
 | DELETE | `/api/posts/:slug` | Delete post |
 | POST | `/api/posts/:slug/publish` | Toggle draft `{ draft: bool }` |
 | GET | `/api/version` | Returns `{ version }` from `PACKAGE_VERSION` env var |
+| GET | `/api/staging` | Returns `{ files, deletions }` counts of `_pending/` entries; admin rebuild bar uses this on load |
 | POST | `/api/pool` | Drop raw photos instantly `multipart/form-data photos[]` → ORIGINALS_BUCKET `_pool/raw/<pid>/` — no resize |
 | GET | `/api/pool` | List pool `{ raw: [...], processed: [...] }` — raw from R2 list, processed from pool manifest |
 | POST | `/api/pool/process` | Process raw → variants via Transform via Workers → ASSETS_BUCKET `_pool/<id>/`; accepts `{ limit }` (default 6); returns `{ processed, remaining }` |
@@ -363,9 +364,15 @@ During local `wrangler pages dev`, logs print to the terminal.
 
 ---
 
-## Current state (last updated: 2026-05-30)
+## Current state (last updated: 2026-09-06)
 
-### v1.5.5 — CURRENT
+### v1.5.6 — CURRENT
+- Fix: upload, pool process, and pool-to-series move now persist manifests after each photo before deleting source objects, so a Worker timeout cannot drop a photo from both R2 listing and staging.
+- Fix: failed image bakes clean up any objects written for that `slug/id` (no leftover public original).
+- Fix: admin rebuild bar reads `GET /api/staging` on load and after mutations, so a refresh no longer claims “Site up to date” while `_pending/` is non-empty.
+- Fix: CDN cache purge retries once and logs failures instead of ignoring them.
+
+### v1.5.5
 - Fix: random new-series slug allocation now checks staging and GitHub before accepting a slug, avoiding silent manifest overwrite if a rare collision occurs.
 
 ### v1.5.4

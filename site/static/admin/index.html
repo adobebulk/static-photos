@@ -786,7 +786,7 @@ let panelSettings = {}; // cached per-panel settings (series detail)
 
 // ── Init ─────────────────────────────────────────────────────────
 loadProjects();
-setRebuildStatus('idle', 'Site up to date');
+refreshStagingStatus();
 loadVersion();
 
 async function loadVersion() {
@@ -826,8 +826,13 @@ async function api(method, path, body, isForm) {
   if (body && !isForm) { opts.headers = { 'Content-Type': 'application/json' }; opts.body = JSON.stringify(body); }
   else if (isForm) { opts.body = body; }
   const res = await fetch('/api' + path, opts);
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.error || 'Request failed');
+  const text = await res.text();
+  let json = {};
+  if (text) {
+    try { json = JSON.parse(text); }
+    catch { throw new Error(res.ok ? 'Invalid response' : `Request failed (${res.status})`); }
+  }
+  if (!res.ok) throw new Error(json.error || `Request failed (${res.status})`);
   return json;
 }
 
@@ -883,7 +888,7 @@ async function createProject() {
     await api('POST', '/projects', { title, description: document.getElementById('new-desc').value.trim() });
     closeSheet('overlay-new');
     await loadProjects();
-    setRebuildStatus('dirty', 'Rebuild needed');
+    await refreshStagingStatus();
     toast(`"${title}" created`);
   } catch(e) { toast(e.message, true); }
 }
@@ -1088,7 +1093,7 @@ async function setHero(slug) {
   try {
     await api('PATCH', '/settings', { heroPhotoKey: key, heroLink: `/projects/${slug}/` });
     toast('Homepage hero updated — rebuild to publish');
-    setRebuildStatus('dirty', 'Rebuild needed');
+    await refreshStagingStatus();
   } catch(e) { toast('Failed: ' + e.message, true); }
 }
 
@@ -1096,7 +1101,7 @@ async function clearHero() {
   try {
     await api('PATCH', '/settings', { heroPhotoKey: '', heroLink: '' });
     toast('Hero cleared — rebuild to publish');
-    setRebuildStatus('dirty', 'Rebuild needed');
+    await refreshStagingStatus();
   } catch(e) { toast('Failed: ' + e.message, true); }
 }
 
@@ -1113,7 +1118,7 @@ async function featurePhoto(slug, id) {
     const el = document.getElementById(`feat-btn-${slug}-${id}`);
     if (el) el.innerHTML = featureBtnHTML(slug, id);
     toast('Added to featured — rebuild to publish');
-    setRebuildStatus('dirty', 'Rebuild needed');
+    await refreshStagingStatus();
   } catch(e) { toast('Failed: ' + e.message, true); }
 }
 
@@ -1126,7 +1131,7 @@ async function unfeaturePhoto(slug, id) {
     const el = document.getElementById(`feat-btn-${slug}-${id}`);
     if (el) el.innerHTML = featureBtnHTML(slug, id);
     toast('Removed from featured — rebuild to publish');
-    setRebuildStatus('dirty', 'Rebuild needed');
+    await refreshStagingStatus();
   } catch(e) { toast('Failed: ' + e.message, true); }
 }
 
@@ -1164,7 +1169,7 @@ async function attachPostToSeries(seriesSlug) {
     const opt = select.querySelector(`option[value="${postSlug}"]`);
     if (opt) opt.remove();
     select.value = '';
-    setRebuildStatus('dirty', 'Rebuild needed');
+    await refreshStagingStatus();
     toast('Post attached — rebuild to publish');
   } catch(e) { toast('Failed: ' + e.message, true); }
 }
@@ -1186,7 +1191,7 @@ async function detachPostFromSeries(seriesSlug, postSlug) {
       opt.textContent = postSlug;
       select.appendChild(opt);
     }
-    setRebuildStatus('dirty', 'Rebuild needed');
+    await refreshStagingStatus();
     toast('Post detached — rebuild to publish');
   } catch(e) { toast('Failed: ' + e.message, true); }
 }
@@ -1207,7 +1212,7 @@ async function movePhoto(slug, id, direction) {
 
   try {
     await api('PATCH', `/projects/${slug}`, { photoOrder });
-    setRebuildStatus('dirty', 'Rebuild needed');
+    await refreshStagingStatus();
     const list = document.getElementById(`photo-list-${slug}`);
     if (list) list.innerHTML = photos.map((f, i) => photoCardHTML(slug, f, i, photos.length)).join('');
     toast('Order saved');
@@ -1219,7 +1224,7 @@ async function saveCaption(slug, id, input) {
   const caption = input.value.trim();
   try {
     await api('PATCH', `/projects/${slug}/photos/${id}`, { caption });
-    setRebuildStatus('dirty', 'Rebuild needed');
+    await refreshStagingStatus();
     toast('Caption saved');
   } catch(e) { toast('Save failed: ' + e.message, true); }
 }
@@ -1229,7 +1234,7 @@ async function saveBody(slug, id, btn) {
   const body = editor.querySelector('textarea').value;
   try {
     await api('PATCH', `/projects/${slug}/photos/${id}`, { body });
-    setRebuildStatus('dirty', 'Rebuild needed');
+    await refreshStagingStatus();
     toast('Note saved');
     const toggle = editor.closest('.photo-card').querySelector('.photo-body-toggle');
     toggle.textContent = '▾ Edit note';
@@ -1241,7 +1246,7 @@ async function clearBody(slug, id, btn) {
   if (!confirm('Remove this note?')) return;
   try {
     await api('PATCH', `/projects/${slug}/photos/${id}`, { body: '' });
-    setRebuildStatus('dirty', 'Rebuild needed');
+    await refreshStagingStatus();
     toast('Note removed');
     const toggle = editor.closest('.photo-card').querySelector('.photo-body-toggle');
     toggle.textContent = '▸ Add note';
@@ -1257,7 +1262,7 @@ async function deletePhoto(slug, id, e) {
   try {
     await api('DELETE', `/projects/${slug}/photos/${id}`);
     document.getElementById(`pcard-${slug}-${id}`)?.remove();
-    setRebuildStatus('dirty', 'Rebuild needed');
+    await refreshStagingStatus();
     toast('Deleted ' + id);
   } catch(e) { toast('Delete failed: ' + e.message, true); }
 }
@@ -1318,7 +1323,7 @@ async function uploadFiles(files, slug) {
   if (failed === 0) toast(`Uploaded ${succeeded} photo${succeeded !== 1 ? 's' : ''}`);
   else toast(`${succeeded} uploaded, ${failed} failed`, failed > 0);
 
-  setRebuildStatus('dirty', 'Rebuild needed');
+  await refreshStagingStatus();
   const p = projects.find(x => x.slug === slug);
   const [photos, settings] = await Promise.all([
     api('GET', `/projects/${slug}/photos`).catch(() => []),
@@ -1338,7 +1343,7 @@ async function saveMetadata(slug) {
   try {
     await api('PATCH', `/projects/${slug}`, { title, description });
     await loadProjects();
-    setRebuildStatus('dirty', 'Rebuild needed');
+    await refreshStagingStatus();
     toast('Saved');
   } catch(e) { toast('Save failed: ' + e.message, true); }
 }
@@ -1348,7 +1353,7 @@ async function togglePublish(slug, isDraft) {
     await api('POST', `/projects/${slug}/publish`, { draft: !isDraft });
     await loadProjects();
     closeSheet('overlay-detail');
-    setRebuildStatus('dirty', 'Rebuild needed');
+    await refreshStagingStatus();
     toast(isDraft ? 'Published' : 'Moved to draft');
   } catch(e) { toast('Failed to update status: ' + e.message, true); }
 }
@@ -1359,7 +1364,7 @@ async function deleteSeries(slug) {
     await api('DELETE', `/projects/${slug}`);
     closeSheet('overlay-detail');
     await loadProjects();
-    setRebuildStatus('dirty', 'Rebuild needed');
+    await refreshStagingStatus();
     toast(`Deleted series '${slug}'`);
   } catch(e) { toast('Delete failed: ' + e.message, true); }
 }
@@ -1482,7 +1487,7 @@ async function savePost() {
       } catch(_) {}
     }
     closeSheet('overlay-post');
-    setRebuildStatus('dirty', 'Rebuild needed');
+    await refreshStagingStatus();
     await loadPostsList();
   } catch(e) { toast('Save failed: ' + e.message, true); }
 }
@@ -1490,7 +1495,7 @@ async function savePost() {
 async function togglePostPublish(slug, isDraft) {
   try {
     await api('POST', `/posts/${slug}/publish`, { draft: !isDraft });
-    setRebuildStatus('dirty', 'Rebuild needed');
+    await refreshStagingStatus();
     toast(isDraft ? 'Post published' : 'Post moved to draft');
     await loadPostsList();
   } catch(e) { toast('Failed: ' + e.message, true); }
@@ -1500,7 +1505,7 @@ async function confirmDeletePost(slug, title) {
   if (!confirm(`Delete post "${title}"? This cannot be undone.`)) return;
   try {
     await api('DELETE', `/posts/${slug}`);
-    setRebuildStatus('dirty', 'Rebuild needed');
+    await refreshStagingStatus();
     toast(`Deleted "${title}"`);
     await loadPostsList();
   } catch(e) { toast('Delete failed: ' + e.message, true); }
@@ -1513,7 +1518,7 @@ async function deletePost() {
   try {
     await api('DELETE', `/posts/${editingPost}`);
     closeSheet('overlay-post');
-    setRebuildStatus('dirty', 'Rebuild needed');
+    await refreshStagingStatus();
     toast(`Deleted "${title}"`);
     await loadPostsList();
   } catch(e) { toast('Delete failed: ' + e.message, true); }
@@ -1601,6 +1606,22 @@ function setRebuildStatus(state, msg) {
   document.getElementById('rebuild-dot').className = 'dot' + (state === 'idle' ? ' idle' : '');
   document.getElementById('rebuild-status').textContent = msg;
   document.getElementById('rebuild-label').textContent = msg;
+}
+
+async function refreshStagingStatus() {
+  try {
+    const s = await api('GET', '/staging');
+    const n = (s.files || 0) + (s.deletions || 0);
+    if (n > 0) {
+      setRebuildStatus('dirty', n === 1
+        ? 'Rebuild needed — 1 pending change'
+        : `Rebuild needed — ${n} pending changes`);
+    } else {
+      setRebuildStatus('idle', 'Site up to date');
+    }
+  } catch (_) {
+    // Leave whatever status is currently shown.
+  }
 }
 
 async function rebuild() {
@@ -1706,7 +1727,7 @@ async function saveSettings() {
   try {
     await api('PATCH', '/settings', body);
     closeSheet('overlay-settings');
-    setRebuildStatus('dirty', 'Rebuild needed');
+    await refreshStagingStatus();
     toast('Settings saved — rebuild to publish');
   } catch(e) { toast('Save failed: ' + e.message, true); }
 }
@@ -1836,7 +1857,7 @@ async function moveSelectedFromPool() {
 
   if (totalMoved > 0) {
     toast(`Moved ${totalMoved} photo${totalMoved !== 1 ? 's' : ''} to ${slug}`);
-    setRebuildStatus('dirty', 'Rebuild needed');
+    await refreshStagingStatus();
     poolSelectedIds.clear();
     const sel = document.getElementById('pool-move-target');
     if (sel) delete sel.dataset.populated;
@@ -1896,7 +1917,7 @@ async function processPool() {
         : `Processed ${totalProcessed} photo${totalProcessed !== 1 ? 's' : ''}`;
     }
     if (totalProcessed > 0) {
-      setRebuildStatus('dirty', 'Rebuild needed');
+      await refreshStagingStatus();
       toast(`Processed ${totalProcessed} photo${totalProcessed !== 1 ? 's' : ''}`);
     } else {
       toast('Nothing to process');
@@ -1905,6 +1926,8 @@ async function processPool() {
   } catch(e) {
     toast('Processing failed: ' + e.message, true);
     if (statusEl) statusEl.textContent = 'Processing failed';
+    if (totalProcessed > 0) await refreshStagingStatus();
+    await loadPool();
   }
 
   if (btn) { btn.disabled = false; btn.textContent = 'Process pool →'; }
@@ -1930,7 +1953,7 @@ async function discardPoolPhoto(id) {
     poolSelectedIds.delete(id);
     renderPoolGrid();
     updatePoolMoveBar();
-    setRebuildStatus('dirty', 'Rebuild needed');
+    await refreshStagingStatus();
     toast('Discarded');
   } catch(e) { toast('Failed: ' + e.message, true); }
 }
@@ -2014,7 +2037,7 @@ async function confirmPoolPickerMove() {
 
   if (allMoved.length) {
     closeSheet('overlay-pool-picker');
-    setRebuildStatus('dirty', 'Rebuild needed');
+    await refreshStagingStatus();
     toast(`Added ${allMoved.length} photo${allMoved.length !== 1 ? 's' : ''} to series`);
 
     // Refresh series detail
