@@ -179,7 +179,7 @@ Publishing photos happens through the **admin UI** (at `photos.ctsmith.org/admin
 
 ## Versioning
 
-Source of truth is `package.json`. When bumping the version, update `package.json` **and** `wrangler.toml [vars] PACKAGE_VERSION` together. `site/data/version.yaml` is generated at build time by `scripts/write-version.js` — do not commit it (it is gitignored). Current version: **1.5.6**
+Source of truth is `package.json`. When bumping the version, update `package.json` **and** `wrangler.toml [vars] PACKAGE_VERSION` together. `site/data/version.yaml` is generated at build time by `scripts/write-version.js` — do not commit it (it is gitignored). Current version: **1.5.7**
 
 ---
 
@@ -366,7 +366,12 @@ During local `wrangler pages dev`, logs print to the terminal.
 
 ## Current state (last updated: 2026-09-06)
 
-### v1.5.6 — CURRENT
+### v1.5.7 — CURRENT
+- Fix: nested admin sheets (Add from pool, Insert photo) now stack above the sheet that opened them. Escape closes only the top sheet.
+- Fix: post photo picker includes Pool as a source, so a new post can insert a processed pool photo.
+- Admin mobile: sticky Series/Posts/Pool chrome, Rebuild in the bottom bar, series table drops slug/Open columns, 640px breakpoint. Desktop layout unchanged.
+
+### v1.5.6
 - Fix: upload, pool process, and pool-to-series move now persist manifests after each photo before deleting source objects, so a Worker timeout cannot drop a photo from both R2 listing and staging.
 - Fix: failed image bakes clean up any objects written for that `slug/id` (no leftover public original).
 - Fix: admin rebuild bar reads `GET /api/staging` on load and after mutations, so a refresh no longer claims “Site up to date” while `_pending/` is non-empty.

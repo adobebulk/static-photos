@@ -2,7 +2,7 @@
 
 A self-hosted photo gallery for an amateur photographer. A fast static Hugo site for visitors, with a private serverless admin panel for managing photos from a phone or laptop — no always-on server.
 
-Everything runs on **Cloudflare + GitHub**. Photos live in R2 (never git). Metadata commits are text-only. Current version: **1.5.6**
+Everything runs on **Cloudflare + GitHub**. Photos live in R2 (never git). Metadata commits are text-only. Current version: **1.5.7**
 
 Content types: **photo series** (grid + lightbox + per-photo permalinks with optional long-form body text) and **text posts** (pure markdown, no photos required). The homepage supports an optional hero image (with caption overlay, linking to the photo's permalink), a curated featured row (series, posts, or individual photos), the full series grid, and a recent posts strip.
 
@@ -150,6 +150,7 @@ See **RUNBOOK.md** for full account setup instructions.
 - **Site title, nav label, photographer name, description** — admin Settings panel (or edit `site/data/settings.yaml` directly)
 - **Colors / typography** — `site/assets/css/input.css` and `tailwind.config.js`
 - **Templates** — `site/themes/gallery/layouts/`
+- **Admin on a phone** — sticky Series/Posts/Pool tabs, Rebuild in the bottom bar, nested sheets stack instead of hiding behind each other. Desktop layout is unchanged.
 
 ---
 

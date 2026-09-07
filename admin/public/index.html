@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
   <title>Photo Admin</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
@@ -32,7 +32,11 @@
     button { font-family: var(--mono); font-size: var(--font-size); cursor: pointer; border: none; background: none; }
 
     /* ── Layout ─────────────────────────────────────────────── */
-    .page { max-width: 860px; margin: 0 auto; padding: 0 16px 80px; }
+    .page { max-width: 860px; margin: 0 auto; padding: 0 16px calc(80px + env(safe-area-inset-bottom, 0px)); }
+    .admin-chrome {
+      position: sticky; top: 0; z-index: 50;
+      background: var(--bg);
+    }
 
     /* ── Header ─────────────────────────────────────────────── */
     .topbar {
@@ -410,11 +414,12 @@
     .rebuild-bar {
       position: fixed; bottom: 0; left: 0; right: 0; z-index: 100;
       background: var(--bg); border-top: 1px solid var(--border);
-      padding: 10px 16px;
+      padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px));
       display: flex; align-items: center; gap: 12px;
       font-size: 12px; color: var(--muted);
     }
-    .rebuild-bar .status { flex: 1; }
+    .rebuild-bar .status { flex: 1; min-width: 0; }
+    .rebuild-bar-action { display: none; flex-shrink: 0; }
     .dot { width: 7px; height: 7px; border-radius: 50%; background: #c8a000; flex-shrink: 0; }
     .dot.idle { background: var(--green); }
     .version-tag { font-size: 10px; opacity: .45; }
@@ -426,6 +431,7 @@
       border: 1px solid #333;
       padding: 7px 16px; border-radius: 2px; font-size: 12px;
       opacity: 0; transition: all .2s; pointer-events: none; white-space: nowrap; z-index: 999;
+      max-width: calc(100vw - 32px);
     }
     #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
     #toast.error { background: var(--red); border-color: var(--red); }
@@ -467,31 +473,51 @@
     .pool-tile-raw:hover { border-color: var(--border-light); }
     .pool-tile-raw-body { padding: 8px 8px 4px; }
 
+    .pool-move-bar {
+      position: fixed; bottom: 52px; left: 0; right: 0; z-index: 99;
+      background: var(--bg); border-top: 2px solid var(--green);
+      padding: 10px 16px; display: flex; align-items: center; gap: 10px;
+      flex-wrap: wrap; font-size: 12px;
+    }
+    .pool-move-bar.hidden { display: none; }
+    .post-body-head {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 8px; margin-bottom: 4px; flex-wrap: wrap;
+    }
+    .col-photos-inline { display: none; }
+
     /* ── Mobile overrides ────────────────────────────────────── */
-    @media (max-width: 480px) {
-      .tab-btn { padding: 12px 20px; flex: 1; text-align: center; }
+    @media (max-width: 640px) {
+      .tab-bar { margin-bottom: 16px; }
+      .tab-btn { padding: 12px 8px; flex: 1; text-align: center; }
 
-      /* Topbar: stack brand above buttons */
-      .topbar { flex-direction: column; align-items: flex-start; gap: 8px; padding: 10px 0 8px; }
-      .topbar-left { width: 100%; justify-content: space-between; }
-      .topbar-nav { width: 100%; }
-      .topbar-nav button { flex: 1; text-align: center; font-size: 13px; }
+      /* Topbar: brand row, then full-width verbs */
+      .topbar { flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 0 8px; }
+      .topbar-left { width: 100%; flex-direction: column; align-items: stretch; gap: 8px; }
+      .topbar-nav { width: 100%; display: flex; }
+      .topbar-nav button { flex: 1; text-align: center; font-size: 13px; min-height: 44px; padding: 4px 12px; }
+      #rebuild-label { display: none; } /* status lives in the bottom bar */
+      #btn-rebuild { display: none; }   /* Rebuild sits in the bottom bar on mobile */
+      .rebuild-bar-action { display: flex; align-items: center; justify-content: center; min-height: 44px; }
 
-      /* Hide slug column in series table */
-      .col-slug { display: none; }
+      /* Series table: row is the hit target; drop slug / count / Open */
+      .col-slug, .col-photos, .col-open { display: none; }
+      .col-photos-inline { display: inline; color: var(--muted); font-size: 11px; }
 
-      /* Touch targets: 44px min height */
+      /* Primary verbs stay 44px. Reorder arrows stay compact so photo cards don't balloon. */
       .btn-action, .btn-outline, .btn-danger { min-height: 44px; display: flex; align-items: center; justify-content: center; }
-      .btn-icon { min-height: 44px; min-width: 44px; justify-content: center; display: flex; align-items: center; }
-      .topbar-nav button { min-height: 44px; padding: 4px 12px; }
       .sheet-close { min-height: 44px; padding: 4px 12px; }
+      .esc-hint { display: none; }
+      .photo-card-del { min-height: 44px; min-width: 44px; }
 
       /* Post list */
       .post-card { flex-direction: column; gap: 8px; }
       .post-card-actions { width: 100%; }
       .post-card-actions button { flex: 1; min-height: 44px; }
 
-      /* Photo card body actions */
+      /* Photo cards: caption is the scarce width */
+      .photo-card-main { gap: 6px; padding: 8px 6px; }
+      .photo-card-thumb { width: 56px; height: 56px; }
       .photo-body-actions { gap: 8px; }
       .photo-body-actions button { flex: 1; min-height: 44px; }
 
@@ -503,21 +529,32 @@
       .featured-add-row .feat-label-input { width: 100%; flex: none; }
       .featured-add-row button { min-height: 44px; }
 
-      /* Settings / form */
-      .field input, .field textarea, .field select { font-size: 16px; } /* prevent zoom on iOS */
-
-      /* Post editor body textarea taller on mobile */
+      /* Settings / form — 16px prevents iOS zoom */
+      .field input, .field textarea, .field select { font-size: 16px; }
       #post-body { min-height: 200px; }
+      .post-body-head { flex-direction: column; align-items: stretch; }
+      .post-body-head .btn-outline { min-height: 44px; }
 
-      /* No horizontal overflow */
-      .page { padding-left: 12px; padding-right: 12px; }
+      .page { padding-left: 12px; padding-right: 12px; padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+      .sheet { max-height: 100svh; padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px)); }
       .sheet-body { padding: 16px; }
+      .sheet-header { padding: 10px 16px; }
+
+      /* Pool move bar sits above the taller rebuild bar */
+      .pool-move-bar {
+        bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+        flex-direction: column; align-items: stretch;
+      }
+      .pool-move-bar select, .pool-move-bar .btn-action { width: 100%; min-height: 44px; }
+
+      #toast { white-space: normal; text-align: center; bottom: calc(64px + env(safe-area-inset-bottom, 0px)); }
     }
   </style>
 </head>
 <body>
 <div class="page">
 
+  <div class="admin-chrome">
   <!-- Header -->
   <div class="topbar">
     <div class="topbar-left">
@@ -525,7 +562,7 @@
       <div class="topbar-nav">
         <button onclick="openSettings()">Settings</button>
         <button id="btn-new" onclick="onNew()">+ New</button>
-        <button id="btn-rebuild" onclick="rebuild()"><span id="rebuild-icon">↻</span> Rebuild</button>
+        <button id="btn-rebuild" data-rebuild-btn onclick="rebuild()"><span data-rebuild-icon>↻</span> Rebuild</button>
       </div>
     </div>
     <span style="font-size:11px;color:var(--muted)" id="rebuild-label">—</span>
@@ -536,6 +573,7 @@
     <button class="tab-btn active" id="tab-btn-series" onclick="switchTab('series')">Series</button>
     <button class="tab-btn" id="tab-btn-posts" onclick="switchTab('posts')">Posts</button>
     <button class="tab-btn" id="tab-btn-pool" onclick="switchTab('pool')">Pool</button>
+  </div>
   </div>
 
   <!-- Series tab -->
@@ -549,9 +587,9 @@
           <tr>
             <th class="col-slug" style="width:130px">Slug</th>
             <th>Title</th>
-            <th style="width:70px;text-align:right">Photos</th>
+            <th class="col-photos" style="width:70px;text-align:right">Photos</th>
             <th style="width:70px">Status</th>
-            <th style="width:90px"></th>
+            <th class="col-open" style="width:90px"></th>
           </tr>
         </thead>
         <tbody id="project-tbody">
@@ -588,7 +626,7 @@
     </div>
     <div id="pool-grid" style="margin-top:16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;"></div>
     <!-- Sticky move bar: shown when processed pool photos are selected -->
-    <div id="pool-move-bar" class="hidden" style="position:fixed;bottom:52px;left:0;right:0;z-index:99;background:var(--bg);border-top:2px solid var(--green);padding:10px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px">
+    <div id="pool-move-bar" class="pool-move-bar hidden">
       <span id="pool-move-label">0 selected</span>
       <div style="flex:1"></div>
       <span style="color:var(--muted)">Move to →</span>
@@ -606,6 +644,7 @@
   <div class="dot idle" id="rebuild-dot"></div>
   <span class="status" id="rebuild-status">Site up to date</span>
   <span class="version-tag" id="version-tag"></span>
+  <button class="btn-action rebuild-bar-action" data-rebuild-btn onclick="rebuild()"><span data-rebuild-icon>↻</span> Rebuild</button>
 </div>
 
 <!-- ── New series sheet ──────────────────────────────────────── -->
@@ -613,7 +652,7 @@
   <div class="sheet">
     <div class="sheet-header">
       <span class="sheet-title">New Series</span>
-      <button class="sheet-close" onclick="closeSheet('overlay-new')">close [esc]</button>
+      <button class="sheet-close" onclick="closeSheet('overlay-new')">Close <span class="esc-hint">[esc]</span></button>
     </div>
     <div class="sheet-body">
       <div class="field">
@@ -636,7 +675,7 @@
   <div class="sheet">
     <div class="sheet-header">
       <span class="sheet-title" id="post-sheet-title">New Post</span>
-      <button class="sheet-close" onclick="closeSheet('overlay-post')">close [esc]</button>
+      <button class="sheet-close" onclick="closeSheet('overlay-post')">Close <span class="esc-hint">[esc]</span></button>
     </div>
     <div class="sheet-body">
       <div class="field">
@@ -648,7 +687,7 @@
         <textarea id="post-excerpt" rows="2" style="min-height:50px" placeholder="Short excerpt for cards — leave blank to skip"></textarea>
       </div>
       <div class="field">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+        <div class="post-body-head">
           <label style="margin-bottom:0">Body (markdown)</label>
           <button class="btn-outline" style="font-size:11px;padding:3px 8px" onclick="openPhotoPicker()">⊕ Insert photo</button>
         </div>
@@ -675,7 +714,7 @@
   <div class="sheet">
     <div class="sheet-header">
       <span class="sheet-title">Site Settings</span>
-      <button class="sheet-close" onclick="closeSheet('overlay-settings')">close [esc]</button>
+      <button class="sheet-close" onclick="closeSheet('overlay-settings')">Close <span class="esc-hint">[esc]</span></button>
     </div>
     <div class="sheet-body">
       <div class="field"><label>Site title</label>
@@ -716,7 +755,7 @@
   <div class="sheet" style="max-height:85svh">
     <div class="sheet-header">
       <span class="sheet-title">Add from Pool</span>
-      <button class="sheet-close" onclick="closeSheet('overlay-pool-picker')">close [esc]</button>
+      <button class="sheet-close" onclick="closeSheet('overlay-pool-picker')">Close <span class="esc-hint">[esc]</span></button>
     </div>
     <div class="sheet-body">
       <div id="pool-picker-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:8px;min-height:60px"></div>
@@ -732,7 +771,7 @@
   <div class="sheet" style="max-height:80svh">
     <div class="sheet-header">
       <span class="sheet-title">Insert Photo</span>
-      <button class="sheet-close" onclick="closeSheet('overlay-photo-picker')">close [esc]</button>
+      <button class="sheet-close" onclick="closeSheet('overlay-photo-picker')">Close <span class="esc-hint">[esc]</span></button>
     </div>
     <div class="sheet-body">
       <div class="field">
@@ -766,7 +805,7 @@
   <div class="sheet">
     <div class="sheet-header">
       <span class="sheet-title" id="detail-title">—</span>
-      <button class="sheet-close" onclick="closeSheet('overlay-detail')">close [esc]</button>
+      <button class="sheet-close" onclick="closeSheet('overlay-detail')">Close <span class="esc-hint">[esc]</span></button>
     </div>
     <div class="sheet-body" id="detail-body"></div>
   </div>
@@ -783,6 +822,7 @@ let currentTab    = 'series';
 let editingPost   = null;
 let featuredItems = [];
 let panelSettings = {}; // cached per-panel settings (series detail)
+let sheetStack    = [];
 
 // ── Init ─────────────────────────────────────────────────────────
 loadProjects();
@@ -865,10 +905,10 @@ function renderTable() {
   tbody.innerHTML = projects.map(p => `
     <tr onclick="openDetail('${p.slug}')">
       <td class="col-slug"><span class="slug-badge">${esc(p.slug)}</span></td>
-      <td>${esc(p.title)}</td>
-      <td style="text-align:right;color:var(--muted)">${p.photoCount}</td>
+      <td>${esc(p.title)}<span class="col-photos-inline"> · ${p.photoCount}</span></td>
+      <td class="col-photos" style="text-align:right;color:var(--muted)">${p.photoCount}</td>
       <td><span class="badge ${p.draft ? 'badge-draft' : 'badge-live'}">${p.draft ? 'Draft' : 'Live'}</span></td>
-      <td style="text-align:right"><button class="btn-action" onclick="openDetail('${p.slug}');event.stopPropagation()">Open →</button></td>
+      <td class="col-open" style="text-align:right"><button class="btn-action" onclick="openDetail('${p.slug}');event.stopPropagation()">Open →</button></td>
     </tr>
   `).join('');
 }
@@ -1534,6 +1574,10 @@ async function openPhotoPicker() {
 
   const select = document.getElementById('picker-series-select');
   select.innerHTML = '<option value="">Select series…</option>';
+  const poolOpt = document.createElement('option');
+  poolOpt.value = '_pool';
+  poolOpt.textContent = 'Pool';
+  select.appendChild(poolOpt);
   try {
     const projs = await api('GET', '/projects');
     projs.filter(p => p.slug !== '_pool').forEach(p => {
@@ -1558,8 +1602,18 @@ async function loadPickerPhotos() {
   if (!slug) { grid.innerHTML = ''; return; }
   grid.innerHTML = '<span style="font-size:12px;color:var(--muted)">Loading…</span>';
   try {
-    const photos = await api('GET', `/projects/${slug}/photos`);
+    let photos;
+    if (slug === '_pool') {
+      const data = await api('GET', '/pool');
+      photos = data.processed || [];
+    } else {
+      photos = await api('GET', `/projects/${slug}/photos`);
+    }
     grid.innerHTML = '';
+    if (!photos.length) {
+      grid.innerHTML = '<span style="font-size:12px;color:var(--muted)">No photos in this source.</span>';
+      return;
+    }
     photos.forEach(p => {
       const img = document.createElement('img');
       img.src = `/assets/${p.key}/600.jpg`;
@@ -1625,9 +1679,10 @@ async function refreshStagingStatus() {
 }
 
 async function rebuild() {
-  const icon = document.getElementById('rebuild-icon');
-  icon.className = 'spin'; icon.textContent = '↻';
-  document.getElementById('btn-rebuild').disabled = true;
+  const btns = document.querySelectorAll('[data-rebuild-btn]');
+  const icons = document.querySelectorAll('[data-rebuild-icon]');
+  btns.forEach(b => { b.disabled = true; });
+  icons.forEach(i => { i.className = 'spin'; i.textContent = '↻'; });
   setRebuildStatus('building', 'Triggering build…');
   try {
     await api('POST', '/rebuild');
@@ -1637,8 +1692,8 @@ async function rebuild() {
     setRebuildStatus('error', 'Failed to trigger build');
     toast('Failed to trigger build: ' + e.message, true);
   }
-  icon.className = ''; icon.textContent = '↻';
-  document.getElementById('btn-rebuild').disabled = false;
+  icons.forEach(i => { i.className = ''; i.textContent = '↻'; });
+  btns.forEach(b => { b.disabled = false; });
 }
 
 // ── Settings ──────────────────────────────────────────────────────
@@ -1733,15 +1788,26 @@ async function saveSettings() {
 }
 
 // ── Sheet helpers ─────────────────────────────────────────────────
-function openSheet(id) { document.getElementById(id).classList.remove('hidden'); document.body.style.overflow = 'hidden'; }
-function closeSheet(id) { document.getElementById(id).classList.add('hidden'); document.body.style.overflow = ''; }
+function openSheet(id) {
+  const el = document.getElementById(id);
+  el.classList.remove('hidden');
+  if (!sheetStack.includes(id)) sheetStack.push(id);
+  el.style.zIndex = String(200 + sheetStack.length);
+  document.body.style.overflow = 'hidden';
+}
+function closeSheet(id) {
+  const el = document.getElementById(id);
+  el.classList.add('hidden');
+  el.style.zIndex = '';
+  sheetStack = sheetStack.filter(x => x !== id);
+  if (!sheetStack.length) document.body.style.overflow = '';
+}
 function closeIfBackdrop(e, id) { if (e.target === document.getElementById(id)) closeSheet(id); }
 
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
-  ['overlay-detail','overlay-new','overlay-settings','overlay-post','overlay-photo-picker','overlay-pool-picker'].forEach(id => {
-    if (!document.getElementById(id).classList.contains('hidden')) closeSheet(id);
-  });
+  if (!sheetStack.length) return;
+  closeSheet(sheetStack[sheetStack.length - 1]);
 });
 
 // ── Pool tab ──────────────────────────────────────────────────────
