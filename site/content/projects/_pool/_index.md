@@ -18,24 +18,6 @@ photos:
     height: 4000
     caption: ''
     downloadable: false
-  - id: '003'
-    key: _pool/003
-    width: 6000
-    height: 4000
-    caption: ''
-    downloadable: false
-  - id: '004'
-    key: _pool/004
-    width: 6000
-    height: 4000
-    caption: ''
-    downloadable: false
-  - id: '007'
-    key: _pool/007
-    width: 5796
-    height: 3864
-    caption: ''
-    downloadable: false
   - id: '008'
     key: _pool/008
     width: 5000
@@ -49,6 +31,7 @@ photos:
     caption: ''
     downloadable: false
 ---
+
 
 
 
