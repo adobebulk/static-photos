@@ -179,7 +179,7 @@ Publishing photos happens through the **admin UI** (at `photos.ctsmith.org/admin
 
 ## Versioning
 
-Source of truth is `package.json`. When bumping the version, update `package.json` **and** `wrangler.toml [vars] PACKAGE_VERSION` together. `site/data/version.yaml` is generated at build time by `scripts/write-version.js` — do not commit it (it is gitignored). Current version: **1.6.1**
+Source of truth is `package.json`. When bumping the version, update `package.json` **and** `wrangler.toml [vars] PACKAGE_VERSION` together. `site/data/version.yaml` is generated at build time by `scripts/write-version.js` — do not commit it (it is gitignored). Current version: **1.6.0**
 
 ---
 
@@ -367,16 +367,12 @@ During local `wrangler pages dev`, logs print to the terminal.
 
 ## Current state (last updated: 2026-09-08)
 
-### v1.6.1 — CURRENT
-- Settings writes now require a readable GitHub baseline unless settings are already staged, preventing GitHub auth/API failures from overwriting live settings with defaults.
-- Admin deploy polling now enforces its three-minute timeout while a build remains active.
-- Documentation consistently treats `CF_ACCOUNT_ID` as a plain variable.
-
-### v1.6.0
+### v1.6.0 — CURRENT
 - CDN purge URLs use `PUBLIC_ORIGIN` (`https://photos.ctsmith.org`) instead of a hardcoded host.
 - `DEPLOY_HOOK_URL` is a Pages secret only — do not put it in `wrangler.toml [vars]` (wrangler-owned vars grey out in the dashboard).
-- Admin Rebuild bar polls `GET /api/deploy-status` (Cloudflare Pages API) when `CF_ACCOUNT_ID` + `CF_API_TOKEN` (Pages Read) are set.
+- Admin Rebuild bar polls `GET /api/deploy-status` (Cloudflare Pages API) when `CF_ACCOUNT_ID` + `CF_API_TOKEN` (Pages Read) are set. Polling stops after three minutes even if Cloudflare still reports an active build.
 - GitHub Contents reads for series/posts/settings no longer 500 the admin on 401 or a missing token (writes and uniqueness checks still throw).
+- Settings writes require a readable GitHub baseline unless settings are already staged, so a token/API failure cannot overwrite live settings with defaults.
 
 ### v1.5.7
 - Fix: nested admin sheets (Add from pool, Insert photo) now stack above the sheet that opened them. Escape closes only the top sheet.
