@@ -1713,6 +1713,11 @@ function startDeployWatch({ beforeId = null, followCurrent = false } = {}) {
       return;
     }
     const tracking = followCurrent || (s.id && s.id !== beforeId);
+    if (Date.now() - started > 180000) {
+      stopDeployWatch();
+      setRebuildStatus('error', 'Build is taking longer than expected — check Pages');
+      return;
+    }
     if (tracking && s.live) {
       setRebuildStatus('building', s.message);
       return;
@@ -1727,11 +1732,6 @@ function startDeployWatch({ beforeId = null, followCurrent = false } = {}) {
         setRebuildStatus('error', s.message);
         toast(s.message, true);
       }
-      return;
-    }
-    if (Date.now() - started > 180000) {
-      stopDeployWatch();
-      setRebuildStatus('error', 'Build is taking longer than expected — check Pages');
       return;
     }
     if (!followCurrent) setRebuildStatus('building', 'Waiting for Cloudflare build…');

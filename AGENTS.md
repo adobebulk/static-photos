@@ -179,7 +179,7 @@ Publishing photos happens through the **admin UI** (at `photos.ctsmith.org/admin
 
 ## Versioning
 
-Source of truth is `package.json`. When bumping the version, update `package.json` **and** `wrangler.toml [vars] PACKAGE_VERSION` together. `site/data/version.yaml` is generated at build time by `scripts/write-version.js` — do not commit it (it is gitignored). Current version: **1.6.0**
+Source of truth is `package.json`. When bumping the version, update `package.json` **and** `wrangler.toml [vars] PACKAGE_VERSION` together. `site/data/version.yaml` is generated at build time by `scripts/write-version.js` — do not commit it (it is gitignored). Current version: **1.6.1**
 
 ---
 
@@ -367,7 +367,12 @@ During local `wrangler pages dev`, logs print to the terminal.
 
 ## Current state (last updated: 2026-09-08)
 
-### v1.6.0 — CURRENT
+### v1.6.1 — CURRENT
+- Settings writes now require a readable GitHub baseline unless settings are already staged, preventing GitHub auth/API failures from overwriting live settings with defaults.
+- Admin deploy polling now enforces its three-minute timeout while a build remains active.
+- Documentation consistently treats `CF_ACCOUNT_ID` as a plain variable.
+
+### v1.6.0
 - CDN purge URLs use `PUBLIC_ORIGIN` (`https://photos.ctsmith.org`) instead of a hardcoded host.
 - `DEPLOY_HOOK_URL` is a Pages secret only — do not put it in `wrangler.toml [vars]` (wrangler-owned vars grey out in the dashboard).
 - Admin Rebuild bar polls `GET /api/deploy-status` (Cloudflare Pages API) when `CF_ACCOUNT_ID` + `CF_API_TOKEN` (Pages Read) are set.

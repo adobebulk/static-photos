@@ -48,7 +48,7 @@ on the **Pages project → Settings → Functions → Bindings & Variables**.
 | `GITHUB_REPO` | Plain var | `adobebulk/static-photos` |
 | `DEPLOY_HOOK_URL` | Secret | Cloudflare Pages deploy-hook URL (the admin "Rebuild" target). **Secret only** — do not put it in `wrangler.toml [vars]`. |
 | `PUBLIC_ORIGIN` | Plain var | `https://photos.ctsmith.org` — CDN purge URLs |
-| `CF_ACCOUNT_ID` | Secret | (optional) account ID for admin build-status |
+| `CF_ACCOUNT_ID` | Plain var | (optional) account ID for admin build-status |
 | `CF_API_TOKEN` | Secret | (optional) Cache Purge and/or Cloudflare Pages Read |
 | `CF_PAGES_PROJECT` | Plain var | (optional) defaults to `static-photos` |
 

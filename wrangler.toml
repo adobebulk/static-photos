@@ -12,7 +12,7 @@ pages_build_output_dir = "site/public"
 [vars]
 HUGO_VERSION = "0.161.1"
 # Keep in sync with package.json version
-PACKAGE_VERSION = "1.6.0"
+PACKAGE_VERSION = "1.6.1"
 GITHUB_REPO = "adobebulk/static-photos"
 ASSETS_R2_PUBLIC_URL = "https://r2.photos.ctsmith.org"
 PUBLIC_ORIGIN = "https://photos.ctsmith.org"
