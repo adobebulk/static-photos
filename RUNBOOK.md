@@ -46,7 +46,11 @@ on the **Pages project → Settings → Functions → Bindings & Variables**.
 | `IMAGES` | Images (transform) binding | Cloudflare resize binding used in the upload pipeline |
 | `GITHUB_TOKEN` | Secret | Fine-grained PAT, scoped to this repo, Contents: read/write |
 | `GITHUB_REPO` | Plain var | `adobebulk/static-photos` |
-| `DEPLOY_HOOK_URL` | Secret | Cloudflare Pages deploy-hook URL (the admin "Rebuild" target) |
+| `DEPLOY_HOOK_URL` | Secret | Cloudflare Pages deploy-hook URL (the admin "Rebuild" target). **Secret only** — do not put it in `wrangler.toml [vars]`. |
+| `PUBLIC_ORIGIN` | Plain var | `https://photos.ctsmith.org` — CDN purge URLs |
+| `CF_ACCOUNT_ID` | Plain var | (optional) account ID for admin build-status |
+| `CF_API_TOKEN` | Secret | (optional) Cache Purge and/or Cloudflare Pages Read |
+| `CF_PAGES_PROJECT` | Plain var | (optional) defaults to `static-photos` |
 
 ---
 
@@ -67,6 +71,10 @@ enter it as a binding/secret in step 6.
 
 4. **Create the deploy hook.** Pages → Settings → Builds & deployments → Deploy hooks → create one
    (name it `admin-rebuild`) on the **production** branch → **copy this down** = `DEPLOY_HOOK_URL`.
+   Set it as a Pages **secret**, never as a `wrangler.toml [vars]` entry (wrangler-owned vars
+   grey out in the dashboard and cannot be overridden). If a prior deploy baked the hook into
+   wrangler vars, deploy a commit that removes it, then add the secret immediately — Rebuild
+   503s in the gap.
 
 5. **Create the GitHub token.** GitHub → Settings → Developer settings → Fine-grained tokens →
    new token, repository access = `adobebulk/static-photos` only, Repository permissions →

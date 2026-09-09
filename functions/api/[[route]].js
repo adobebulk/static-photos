@@ -200,7 +200,7 @@ async function purgeCacheFiles(env, urls) {
   }
 }
 
-const assetUrl = (key) => `https://photos.ctsmith.org/assets/${key}`;
+const assetUrl = (env, key) => `${env.publicOrigin}/assets/${key}`;
 
 const photoAssetKeys = (slug, id) => [
   ...SIZES.flatMap((s) => FORMATS.map(({ ext }) => `${slug}/${id}/${s}.${ext}`)),
@@ -208,7 +208,7 @@ const photoAssetKeys = (slug, id) => [
 ];
 
 async function purgeAssetKeys(env, keys) {
-  await purgeCacheFiles(env, keys.map((key) => assetUrl(key)));
+  await purgeCacheFiles(env, keys.map((key) => assetUrl(env, key)));
 }
 
 async function cleanupPhotoAssets(env, slug, id) {
@@ -304,21 +304,53 @@ const DEFAULT_SETTINGS = {
   featured: [],
 };
 
+async function listGithubDirs(env, path) {
+  if (!env.githubToken || !env.githubRepo) return [];
+  try {
+    const entries = await listDir(env.githubToken, env.githubRepo, path);
+    return entries ? entries.filter((e) => e.type === "dir").map((e) => e.name) : [];
+  } catch (e) {
+    console.error(`[listGithubDirs] ${path}:`, e);
+    return [];
+  }
+}
+
+async function githubFileFallback(env, path) {
+  if (!env.githubToken || !env.githubRepo) return null;
+  try {
+    return await getFile(env.githubToken, env.githubRepo, path);
+  } catch (e) {
+    console.error(`[githubFileFallback] ${path}:`, e);
+    return null;
+  }
+}
+
+async function githubFileRequired(env, path) {
+  if (!env.githubToken || !env.githubRepo) {
+    throw new Error("GitHub credentials not configured");
+  }
+  return getFile(env.githubToken, env.githubRepo, path);
+}
+
 async function readManifest(env, slug) {
   const result = await readStaged(
     env.stagingBucket,
     indexPath(slug),
-    async (p) => getFile(env.githubToken, env.githubRepo, p)
+    async (p) => githubFileFallback(env, p)
   );
   if (!result) return null;
   return { ...parseFrontMatter(result.content), raw: result.content };
 }
 
-async function readSettings(env) {
+async function readSettings(env, { requireGithub = false } = {}) {
   const result = await readStaged(
     env.stagingBucket,
     settingsPath,
-    async (p) => getFile(env.githubToken, env.githubRepo, p)
+    // Reads may degrade to defaults, but writes must never treat an unavailable
+    // GitHub baseline as an empty settings file and overwrite real configuration.
+    async (p) => requireGithub
+      ? githubFileRequired(env, p)
+      : githubFileFallback(env, p)
   );
   const settings = result ? (yaml.load(result.content) ?? {}) : {};
   return { ...DEFAULT_SETTINGS, ...settings };
@@ -369,8 +401,7 @@ export async function onRequest(ctx) {
   try {
     // ── GET /api/projects ────────────────────────────────────────────────────
     if (method === "GET" && segments.length === 1 && segments[0] === "projects") {
-      const entries = await listDir(env.githubToken, env.githubRepo, "site/content/projects");
-      const ghSlugs = entries ? entries.filter((e) => e.type === "dir").map((e) => e.name) : [];
+      const ghSlugs = await listGithubDirs(env, "site/content/projects");
       const stagedSlugs = await getStagedSlugs(env.stagingBucket);
       const allSlugs = [...new Set([...ghSlugs, ...stagedSlugs])].filter(s => s !== POOL_SLUG);
 
@@ -511,7 +542,7 @@ export async function onRequest(ctx) {
         } else {
           // Delete from public bucket and purge CDN cache
           await env.assetsBucket.delete(originalKey);
-          await purgeCache(env, assetUrl(originalKey));
+          await purgeCache(env, assetUrl(env, originalKey));
         }
         updated.downloadable = body.downloadable;
       }
@@ -685,6 +716,53 @@ export async function onRequest(ctx) {
       });
     }
 
+    // ── GET /api/deploy-status ───────────────────────────────────────────────
+    if (method === "GET" && segments.length === 1 && segments[0] === "deploy-status") {
+      if (!env.cfApiToken || !env.cfAccountId) {
+        return json({ configured: false });
+      }
+      const project = encodeURIComponent(env.cfPagesProject);
+      const url =
+        `https://api.cloudflare.com/client/v4/accounts/${env.cfAccountId}` +
+        `/pages/projects/${project}/deployments?env=production&per_page=1`;
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${env.cfApiToken}` },
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok || !payload.success) {
+        const msg = payload.errors?.[0]?.message || `Cloudflare API ${res.status}`;
+        return err(msg, 502);
+      }
+      const dep = payload.result?.[0];
+      if (!dep) return json({ configured: true, id: null, live: false, ok: true, message: "No deployments yet" });
+
+      const stage = dep.latest_stage || {};
+      const stageStatus = stage.status || "";
+      const stageName = stage.name || "";
+      const live = stageStatus === "active" || stageName === "queued";
+      const failed = stageStatus === "failure" || stageStatus === "canceled" || dep.is_skipped;
+      const ok = !failed && !live;
+      const short = (dep.deployment_trigger?.metadata?.commit_hash || dep.id || "").slice(0, 7);
+      let message = "Site up to date";
+      if (live) message = stageName ? `Building — ${stageName}` : "Building…";
+      else if (stageStatus === "failure") message = "Build failed";
+      else if (stageStatus === "canceled") message = "Build canceled";
+      else if (dep.is_skipped) message = "Build skipped";
+      else if (short) message = `Live — ${short}`;
+
+      return json({
+        configured: true,
+        id: dep.id,
+        live,
+        ok,
+        status: stageStatus,
+        stage: stageName,
+        commit: short,
+        message,
+        created_on: dep.created_on,
+      });
+    }
+
     // ── POST /api/deploy ─────────────────────────────────────────────────────
     if (method === "POST" && segments.length === 1 && segments[0] === "deploy") {
       if (!env.deployHookUrl) return err("DEPLOY_HOOK_URL not configured", 503);
@@ -707,7 +785,7 @@ export async function onRequest(ctx) {
     if (method === "PATCH" && segments.length === 1 && segments[0] === "settings") {
       const body = await request.json();
       const allowedKeys = ["title", "navLabel", "photographer", "description", "heroPhotoKey", "heroLink", "featured"];
-      const updated = await readSettings(env);
+      const updated = await readSettings(env, { requireGithub: true });
       for (const k of allowedKeys) {
         if (body[k] !== undefined) updated[k] = body[k];
       }
@@ -728,8 +806,7 @@ export async function onRequest(ctx) {
 
     // ── GET /api/posts ────────────────────────────────────────────────────────
     if (method === "GET" && segments.length === 1 && segments[0] === "posts") {
-      const entries = await listDir(env.githubToken, env.githubRepo, "site/content/posts");
-      const ghSlugs = entries ? entries.filter((e) => e.type === "dir").map((e) => e.name) : [];
+      const ghSlugs = await listGithubDirs(env, "site/content/posts");
       const stagedSlugs = await getStagedPostSlugs(env.stagingBucket);
       const allSlugs = [...new Set([...ghSlugs, ...stagedSlugs])];
 
@@ -739,7 +816,7 @@ export async function onRequest(ctx) {
           const result = await readStaged(
             env.stagingBucket,
             postPath(slug),
-            async (p) => getFile(env.githubToken, env.githubRepo, p)
+            async (p) => githubFileFallback(env, p)
           );
           if (!result) return null;
           const { data } = parseFrontMatter(result.content);
@@ -787,7 +864,7 @@ export async function onRequest(ctx) {
       const result = await readStaged(
         env.stagingBucket,
         postPath(slug),
-        async (p) => getFile(env.githubToken, env.githubRepo, p)
+        async (p) => githubFileFallback(env, p)
       );
       if (!result) return err("post not found", 404);
       const { data, body: postBody } = parseFrontMatter(result.content);
@@ -803,7 +880,7 @@ export async function onRequest(ctx) {
       const result = await readStaged(
         env.stagingBucket,
         postPath(slug),
-        async (p) => getFile(env.githubToken, env.githubRepo, p)
+        async (p) => githubFileFallback(env, p)
       );
       if (!result) return err("post not found", 404);
       const { data, body: postBody } = parseFrontMatter(result.content);
@@ -826,7 +903,7 @@ export async function onRequest(ctx) {
       const result = await readStaged(
         env.stagingBucket,
         postPath(slug),
-        async (p) => getFile(env.githubToken, env.githubRepo, p)
+        async (p) => githubFileFallback(env, p)
       );
       if (!result) return err("post not found", 404);
       await stageDelete(env.stagingBucket, postPath(slug));
@@ -847,7 +924,7 @@ export async function onRequest(ctx) {
       const result = await readStaged(
         env.stagingBucket,
         postPath(slug),
-        async (p) => getFile(env.githubToken, env.githubRepo, p)
+        async (p) => githubFileFallback(env, p)
       );
       if (!result) return err("post not found", 404);
       const { data, body: postBody } = parseFrontMatter(result.content);

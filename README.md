@@ -2,7 +2,7 @@
 
 A self-hosted photo gallery for an amateur photographer. A fast static Hugo site for visitors, with a private serverless admin panel for managing photos from a phone or laptop — no always-on server.
 
-Everything runs on **Cloudflare + GitHub**. Photos live in R2 (never git). Metadata commits are text-only. Current version: **1.5.7**
+Everything runs on **Cloudflare + GitHub**. Photos live in R2 (never git). Metadata commits are text-only. Current version: **1.6.0**
 
 Content types: **photo series** (grid + lightbox + per-photo permalinks with optional long-form body text) and **text posts** (pure markdown, no photos required). The homepage supports an optional hero image (with caption overlay, linking to the photo's permalink), a curated featured row (series, posts, or individual photos), the full series grid, and a recent posts strip.
 
@@ -122,9 +122,11 @@ No image files ever enter `content/` or git. All photos live in R2.
 
 1. **Upload photos** via the admin panel — photos are resized and stored in R2; metadata is staged in `_pending/` (ORIGINALS_BUCKET).
 2. **Edit metadata** (captions, cover, series settings) — all changes are staged.
-3. **Rebuild** — the admin "Rebuild" button flushes all staged changes into one GitHub commit, then pings the Cloudflare Pages deploy hook. Pages rebuilds the site.
+3. **Rebuild** — the admin "Rebuild" button flushes all staged changes into one GitHub commit, then pings the Cloudflare Pages deploy hook. Pages rebuilds the site. When `CF_ACCOUNT_ID` and `CF_API_TOKEN` (Pages Read) are set, the rebuild bar polls `GET /api/deploy-status` until the production deploy finishes.
 
 Staged changes are visible in the admin immediately (the API reads staging before falling back to GitHub). The admin rebuild bar reads pending file/delete counts from `GET /api/staging` on load, so a refresh still shows “Rebuild needed” when `_pending/` is non-empty. Visitors see the updated site after the Pages build completes (~30 s). Destructive photo and series actions also purge affected `/assets/*` URLs so immutable CDN cache entries do not outlive deleted R2 objects. Upload, pool process, and pool-to-series moves persist the relevant manifest after each photo before deleting source objects, so a Worker timeout cannot drop a photo from both places.
+
+Settings reads can still degrade gracefully when GitHub is unavailable, but settings writes require a readable GitHub baseline unless a staged settings file already exists. This prevents a temporary token or API failure from replacing live settings with defaults. Deploy-status polling stops after three minutes even when Cloudflare continues to report an active build.
 
 ---
 
@@ -136,10 +138,13 @@ Staged changes are visible in the admin immediately (the API reads staging befor
 | `ORIGINALS_BUCKET` | R2 | Private bucket — all originals + staging (`_pending/`) |
 | `GITHUB_TOKEN` | Secret | Fine-grained PAT, Contents read/write on this repo |
 | `GITHUB_REPO` | Var | `"owner/repo"` |
-| `DEPLOY_HOOK_URL` | Secret | Cloudflare Pages deploy hook URL |
+| `DEPLOY_HOOK_URL` | Secret | Cloudflare Pages deploy hook URL (never a wrangler.toml `[vars]` entry) |
 | `ASSETS_R2_PUBLIC_URL` | Var | Public custom domain for ORIGINALS_BUCKET, e.g. `https://r2.photos.ctsmith.org` — used as Transform via Workers source |
+| `PUBLIC_ORIGIN` | Var | Public site origin, `https://photos.ctsmith.org` — used for CDN purge URLs |
 | `CF_ZONE_ID` | Var | (optional) Zone ID for global CDN cache purge |
-| `CF_API_TOKEN` | Secret | (optional) Token with Cache Purge permission |
+| `CF_ACCOUNT_ID` | Var | (optional) Account ID — admin Rebuild bar polls Pages deploy status |
+| `CF_API_TOKEN` | Secret | (optional) Cache Purge and/or **Cloudflare Pages Read** |
+| `CF_PAGES_PROJECT` | Var | (optional) Pages project name; defaults to `static-photos` |
 
 See **RUNBOOK.md** for full account setup instructions.
 
