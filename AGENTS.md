@@ -106,7 +106,7 @@ Merge to `main` only when explicitly instructed after review. Squash if the bran
 | Admin backend | Pages Functions (`/api/*`) | Serverless. Existing monospace admin UI kept; backend rewritten to talk to R2 + GitHub. |
 | Admin UI | Static HTML at `/admin` | `site/static/admin/index.html` — served by Pages, gated by Access. |
 | Auth | Cloudflare Access | Gates `/admin*` and `/api*` on `photos.ctsmith.org`. |
-| Deploy trigger | Cloudflare Pages deploy hook | The admin "Rebuild" button POSTs to `DEPLOY_HOOK_URL`. |
+| Deploy trigger | Cloudflare Pages deploy hook | The admin "Rebuild" button POSTs to `DEPLOY_HOOK_URL`. The rebuild bar polls `GET /api/deploy-status` when `CF_ACCOUNT_ID` + `CF_API_TOKEN` (Pages Read) are set. |
 
 ---
 
@@ -179,7 +179,7 @@ Publishing photos happens through the **admin UI** (at `photos.ctsmith.org/admin
 
 ## Versioning
 
-Source of truth is `package.json`. When bumping the version, update `package.json` **and** `wrangler.toml [vars] PACKAGE_VERSION` together. `site/data/version.yaml` is generated at build time by `scripts/write-version.js` — do not commit it (it is gitignored). Current version: **1.5.7**
+Source of truth is `package.json`. When bumping the version, update `package.json` **and** `wrangler.toml [vars] PACKAGE_VERSION` together. `site/data/version.yaml` is generated at build time by `scripts/write-version.js` — do not commit it (it is gitignored). Current version: **1.6.0**
 
 ---
 
@@ -284,6 +284,7 @@ featured: []          # ordered list of { type: "series"|"post"|"photo", slug, l
 | PATCH | `/api/projects/:slug` | Update metadata `{ title, description, cover, draft, downloadsDefault }` |
 | POST | `/api/projects/:slug/publish` | Publish/unpublish `{ draft: bool }` |
 | POST | `/api/rebuild` | Flush staged changes → GitHub commit + ping Pages deploy hook |
+| GET | `/api/deploy-status` | Latest production Pages deploy `{ configured, live, ok, message, commit }` |
 | GET | `/api/settings` | Read `site/data/settings.yaml` |
 | PATCH | `/api/settings` | Update settings (merges; does not wipe missing keys) |
 | GET | `/api/posts` | List all posts (GitHub + staging, exclude staged-deleted) |
@@ -364,9 +365,15 @@ During local `wrangler pages dev`, logs print to the terminal.
 
 ---
 
-## Current state (last updated: 2026-09-06)
+## Current state (last updated: 2026-09-08)
 
-### v1.5.7 — CURRENT
+### v1.6.0 — CURRENT
+- CDN purge URLs use `PUBLIC_ORIGIN` (`https://photos.ctsmith.org`) instead of a hardcoded host.
+- `DEPLOY_HOOK_URL` is a Pages secret only — do not put it in `wrangler.toml [vars]` (wrangler-owned vars grey out in the dashboard).
+- Admin Rebuild bar polls `GET /api/deploy-status` (Cloudflare Pages API) when `CF_ACCOUNT_ID` + `CF_API_TOKEN` (Pages Read) are set.
+- GitHub Contents reads for series/posts/settings no longer 500 the admin on 401 or a missing token (writes and uniqueness checks still throw).
+
+### v1.5.7
 - Fix: nested admin sheets (Add from pool, Insert photo) now stack above the sheet that opened them. Escape closes only the top sheet.
 - Fix: post photo picker includes Pool as a source, so a new post can insert a processed pool photo.
 - Admin mobile: sticky Series/Posts/Pool chrome, Rebuild in the bottom bar, series table drops slug/Open columns, 640px breakpoint. Desktop layout unchanged.

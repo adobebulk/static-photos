@@ -422,6 +422,7 @@
     .rebuild-bar-action { display: none; flex-shrink: 0; }
     .dot { width: 7px; height: 7px; border-radius: 50%; background: #c8a000; flex-shrink: 0; }
     .dot.idle { background: var(--green); }
+    .dot.error { background: var(--red); }
     .version-tag { font-size: 10px; opacity: .45; }
 
     /* ── Toast ───────────────────────────────────────────────── */
@@ -827,6 +828,7 @@ let sheetStack    = [];
 // ── Init ─────────────────────────────────────────────────────────
 loadProjects();
 refreshStagingStatus();
+syncDeployStatus();
 loadVersion();
 
 async function loadVersion() {
@@ -1657,12 +1659,28 @@ function insertPhotoMarkdown() {
 
 // ── Rebuild ───────────────────────────────────────────────────────
 function setRebuildStatus(state, msg) {
-  document.getElementById('rebuild-dot').className = 'dot' + (state === 'idle' ? ' idle' : '');
+  const cls = state === 'idle' ? ' idle' : state === 'error' ? ' error' : '';
+  document.getElementById('rebuild-dot').className = 'dot' + cls;
   document.getElementById('rebuild-status').textContent = msg;
   document.getElementById('rebuild-label').textContent = msg;
 }
 
+let deployWatch = null;
+
+function stopDeployWatch() {
+  if (deployWatch) { clearInterval(deployWatch); deployWatch = null; }
+}
+
+async function fetchDeployStatus() {
+  try {
+    return await api('GET', '/deploy-status');
+  } catch (_) {
+    return null;
+  }
+}
+
 async function refreshStagingStatus() {
+  if (deployWatch) return;
   try {
     const s = await api('GET', '/staging');
     const n = (s.files || 0) + (s.deletions || 0);
@@ -1678,17 +1696,65 @@ async function refreshStagingStatus() {
   }
 }
 
+async function syncDeployStatus() {
+  const s = await fetchDeployStatus();
+  if (!s || !s.configured) return;
+  if (s.live) startDeployWatch({ followCurrent: true, beforeId: s.id });
+}
+
+function startDeployWatch({ beforeId = null, followCurrent = false } = {}) {
+  stopDeployWatch();
+  const started = Date.now();
+  const tick = async () => {
+    const s = await fetchDeployStatus();
+    if (!s || !s.configured) {
+      stopDeployWatch();
+      if (!followCurrent) setRebuildStatus('idle', 'Build triggered ✓');
+      return;
+    }
+    const tracking = followCurrent || (s.id && s.id !== beforeId);
+    if (tracking && s.live) {
+      setRebuildStatus('building', s.message);
+      return;
+    }
+    if (tracking && !s.live) {
+      stopDeployWatch();
+      if (s.ok) {
+        setRebuildStatus('idle', s.message);
+        if (!followCurrent) toast('Build live');
+        await refreshStagingStatus();
+      } else {
+        setRebuildStatus('error', s.message);
+        toast(s.message, true);
+      }
+      return;
+    }
+    if (Date.now() - started > 180000) {
+      stopDeployWatch();
+      setRebuildStatus('error', 'Build is taking longer than expected — check Pages');
+      return;
+    }
+    if (!followCurrent) setRebuildStatus('building', 'Waiting for Cloudflare build…');
+  };
+  tick();
+  deployWatch = setInterval(tick, 3000);
+}
+
 async function rebuild() {
   const btns = document.querySelectorAll('[data-rebuild-btn]');
   const icons = document.querySelectorAll('[data-rebuild-icon]');
   btns.forEach(b => { b.disabled = true; });
   icons.forEach(i => { i.className = 'spin'; i.textContent = '↻'; });
   setRebuildStatus('building', 'Triggering build…');
+  let beforeId = null;
   try {
+    const before = await fetchDeployStatus();
+    if (before && before.configured) beforeId = before.id || null;
     await api('POST', '/rebuild');
-    setRebuildStatus('idle', 'Build triggered ✓');
-    toast('Build triggered — check Cloudflare Pages for progress');
+    toast('Build triggered');
+    startDeployWatch({ beforeId });
   } catch(e) {
+    stopDeployWatch();
     setRebuildStatus('error', 'Failed to trigger build');
     toast('Failed to trigger build: ' + e.message, true);
   }
