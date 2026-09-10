@@ -369,6 +369,7 @@ During local `wrangler pages dev`, logs print to the terminal.
 
 ### v1.6.1 — CURRENT
 - Local admin can read public GitHub files and list series/posts without a real PAT (raw file reads; directory lists via unauthenticated Contents). Saving still needs `GITHUB_TOKEN`.
+- Local Hugo 0.109: `hugo --source site` needs `--config hugo.toml`.
 
 ### v1.6.0
 - CDN purge URLs use `PUBLIC_ORIGIN` (`https://photos.ctsmith.org`) instead of a hardcoded host.
