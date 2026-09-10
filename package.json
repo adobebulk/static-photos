@@ -1,13 +1,13 @@
 {
   "name": "static-photos",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "private": true,
   "scripts": {
     "css:build": "tailwindcss -i site/assets/css/input.css -o site/static/css/style.css --minify",
     "css:watch": "tailwindcss -i site/assets/css/input.css -o site/static/css/style.css --watch",
-    "hugo:dev": "hugo server --source site --disableFastRender",
+    "hugo:dev": "hugo server --source site --config hugo.toml --disableFastRender",
     "dev": "node scripts/write-version.js && concurrently \"npm run css:watch\" \"npm run hugo:dev\"",
-    "build": "node scripts/write-version.js && tailwindcss -i site/assets/css/input.css -o site/static/css/style.css --minify && hugo --source site --minify"
+    "build": "node scripts/write-version.js && tailwindcss -i site/assets/css/input.css -o site/static/css/style.css --minify && hugo --source site --config hugo.toml --minify"
   },
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.19",

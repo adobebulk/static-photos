@@ -179,7 +179,7 @@ Publishing photos happens through the **admin UI** (at `photos.ctsmith.org/admin
 
 ## Versioning
 
-Source of truth is `package.json`. When bumping the version, update `package.json` **and** `wrangler.toml [vars] PACKAGE_VERSION` together. `site/data/version.yaml` is generated at build time by `scripts/write-version.js` — do not commit it (it is gitignored). Current version: **1.6.0**
+Source of truth is `package.json`. When bumping the version, update `package.json` **and** `wrangler.toml [vars] PACKAGE_VERSION` together. `site/data/version.yaml` is generated at build time by `scripts/write-version.js` — do not commit it (it is gitignored). Current version: **1.6.1**
 
 ---
 
@@ -365,9 +365,13 @@ During local `wrangler pages dev`, logs print to the terminal.
 
 ---
 
-## Current state (last updated: 2026-09-08)
+## Current state (last updated: 2026-09-10)
 
-### v1.6.0 — CURRENT
+### v1.6.1 — CURRENT
+- Local admin can read public GitHub files and list series/posts without a real PAT (raw file reads; directory lists via unauthenticated Contents). Saving still needs `GITHUB_TOKEN`.
+- Local Hugo 0.109: `hugo --source site` needs `--config hugo.toml`.
+
+### v1.6.0
 - CDN purge URLs use `PUBLIC_ORIGIN` (`https://photos.ctsmith.org`) instead of a hardcoded host.
 - `DEPLOY_HOOK_URL` is a Pages secret only — do not put it in `wrangler.toml [vars]` (wrangler-owned vars grey out in the dashboard).
 - Admin Rebuild bar polls `GET /api/deploy-status` (Cloudflare Pages API) when `CF_ACCOUNT_ID` + `CF_API_TOKEN` (Pages Read) are set. Polling stops after three minutes even if Cloudflare still reports an active build.

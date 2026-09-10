@@ -2,7 +2,7 @@
 
 A self-hosted photo gallery for an amateur photographer. A fast static Hugo site for visitors, with a private serverless admin panel for managing photos from a phone or laptop — no always-on server.
 
-Everything runs on **Cloudflare + GitHub**. Photos live in R2 (never git). Metadata commits are text-only. Current version: **1.6.0**
+Everything runs on **Cloudflare + GitHub**. Photos live in R2 (never git). Metadata commits are text-only. Current version: **1.6.1**
 
 Content types: **photo series** (grid + lightbox + per-photo permalinks with optional long-form body text) and **text posts** (pure markdown, no photos required). The homepage supports an optional hero image (with caption overlay, linking to the photo's permalink), a curated featured row (series, posts, or individual photos), the full series grid, and a recent posts strip.
 
@@ -82,6 +82,8 @@ npm run dev
 cp .dev.vars.example .dev.vars   # fill in real values
 npx wrangler pages dev site/public
 ```
+
+A real `GITHUB_TOKEN` is required to save from admin. Public-repo reads (file contents and directory lists) work without one.
 
 The `/api/*` and `/assets/*` routes require real R2 bindings from `.dev.vars`. The Hugo site itself works with just `npm run dev`.
 
