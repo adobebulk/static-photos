@@ -11,6 +11,11 @@ photos:
     width: 8000
     height: 6000
     caption: ''
+  - id: '008'
+    key: t467d1/008
+    width: 6003
+    height: 6003
+    caption: ''
   - id: '002'
     key: t467d1/002
     width: 8000
@@ -41,7 +46,19 @@ photos:
     width: 6048
     height: 6048
     caption: ''
+lastPhotoId: 9
 ---
+
+
+
+
+
+
+
+
+
+
+
 
 
 
